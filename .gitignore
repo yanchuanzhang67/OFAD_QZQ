@@ -1,0 +1,33 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+*.so
+
+# --- ML / data ---
+*.onnx
+*.engine
+*.trt
+*.pt
+*.pth
+*.ckpt
+runs/
+logs/
+wandb/
+
+# --- ROS 2 / colcon ---
+install/
+log/
+build_colcon/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS痕
+.DS_Store

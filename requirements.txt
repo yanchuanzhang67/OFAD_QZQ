@@ -1,0 +1,18 @@
+# Core (always required)
+numpy>=1.20
+pyyaml>=6.0
+
+# Perception / World Model / Policy (uncomment in training env)
+# torch>=1.12
+# torchvision>=0.13
+
+# Nonlinear safety optimization (optional; SafetyFilter falls back to projection)
+# casadi>=3.5
+
+# Simulation (optional)
+# carla>=0.9
+# gymnasium>=0.28
+
+# Deployment (optional)
+# onnx>=1.13
+# onnxruntime>=1.14

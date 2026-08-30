@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orad"
+version = "0.1.0"
+description = "Off-Road Unstructured IL+RL Modular End-to-End Autonomous Driving"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "numpy>=1.20",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Core learning stack
+perception = ["torch>=1.12"]
+optimization = ["casadi>=3.5"]
+sim = ["carla", "gymnasium"]
+deploy = ["onnx>=1.13", "onnxruntime>=1.14"]
+dev = ["pytest>=6.2", "pytest-cov"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = ["tests"]
+addopts = "-ra -q -p no:anyio"
+markers = [
+    "unit: unit tests (fast, no external services)",
+    "integration: open-loop integration tests",
+    "closed_loop: closed-loop simulation tests (require CARLA/Gazebo)",
+    "slow: long-running tests",
+]

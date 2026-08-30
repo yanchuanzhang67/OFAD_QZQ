@@ -1,0 +1,40 @@
+# Canonical system-level contract values. Module-specific loaders should derive
+# their dataclasses from this file rather than redefining physical limits.
+geometry:
+  bev_x_range: [-12.5, 12.5]
+  bev_y_range: [-12.5, 12.5]
+  bev_resolution: 0.5
+  bev_channels: 32
+sensors:
+  num_cameras: 3
+  image_size: [192, 192]
+  num_points: 256
+  imu_steps: 10
+  imu_channels: 6
+vehicle:
+  wheelbase: 2.5
+  max_steering: 0.5
+  max_steering_rate: 0.5
+  max_accel: 3.0
+  max_decel: -5.0
+  max_lateral_accel: 4.0
+control:
+  dt: 0.1
+domain_randomization:
+  tire_friction: [0.4, 1.4]
+  vehicle_mass: [1500.0, 1900.0]
+  lidar_sigma: [0.0, 0.1]
+  lidar_dropout: [0.0, 0.05]
+  suspension_damping: [400.0, 1200.0]
+affordance:
+  enabled: false
+  hidden_channels: 32
+  traversability_weight: 1.0
+  roughness_weight: 1.0
+  speed_epsilon: 0.5
+policy_training:
+  imagination_horizon: 5
+  bc_xy_weight: 1.0
+  bc_heading_weight: 0.2
+  bc_speed_weight: 0.2
+  bc_smooth_weight: 0.05
