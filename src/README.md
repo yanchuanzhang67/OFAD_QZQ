@@ -1,0 +1,40 @@
+# Source Package Map
+
+`src/` 按运行时数据流分层。跨层共享契约只放在 `utils`，系统装配只放在
+`configuration`；业务模块不得反向依赖 `scripts` 或具体仿真入口。
+
+```text
+utils + configuration
+        │
+        ├─ perception ── affordance
+        ├─ policy / world_model
+        ├─ safety
+        ├─ sim
+        ├─ orad_ros2
+        └─ deployment / cpp
+```
+
+| Package | Responsibility | Stable entry point |
+|---|---|---|
+| `utils` | schema、frame、公共类型、几何契约、前模型传感器健康门禁 | `utils.types`, `utils.schema`, `utils.sensor_health` |
+| `configuration` | 严格读取唯一系统 YAML 并装配全栈 | `load_system_stack` |
+| `perception` | 独立传感器编码、BEV fusion、occupancy | `BEVFusion` |
+| `affordance` | traversability/roughness 辅助任务 | `TerrainAffordanceHead` |
+| `policy` | BC、RSSM、world model、actor/critic | `HybridPolicy` |
+| `world_model` | 目标独立边界；当前实现仍在 `policy` | 待迁移 |
+| `safety` | supervisor、运动学投影、碰撞过滤 | `SafetySupervisor`, `SafetyFilter` |
+| `sim` | simulator adapter、健康门禁编排、闭环 runner、DR | `CarlaClosedLoopRunner` |
+| `orad_ros2` | controller 与 ROS 2 adapter | `PurePursuitController` |
+| `deployment` / `cpp` | ONNX 与目标 TensorRT runtime | `onnx_export` / 待实现 |
+
+## Perception internal boundary
+
+```text
+encoders.py       camera depth lifting backbone + IMU encoder
+bev_fusion.py     static geometry, LiDAR scatter, model facade, occupancy head
+fusion.py         explicit camera/LiDAR availability and BEV Conv fuser
+```
+
+外部代码继续从 `perception.bev_fusion` 导入 `BEVFusion` 和
+`BEVFusionConfig`。内部拆分不得破坏该入口或已有 checkpoint key；新 backend
+必须先对齐 BEV `(B,C,H=y,W=x)`、frame、resolution 与有限值契约。

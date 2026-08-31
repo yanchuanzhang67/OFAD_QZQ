@@ -19,8 +19,8 @@ pure-pursuit controller (override with ``policy_frame='world'``).
 """
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass
+from collections import Counter, deque
+from dataclasses import dataclass, field
 import time
 from typing import Callable, Optional, Tuple
 
@@ -28,6 +28,11 @@ import numpy as np
 
 from safety.supervisor import SafetyMode, SafetySupervisor, SafetySupervisorConfig
 from utils.schema import Observation
+from utils.sensor_health import (
+    SensorHealthGate,
+    SensorHealthReason,
+    SensorHealthReport,
+)
 from utils.types import OccupancyGrid, Trajectory, VehicleState, Waypoint
 
 try:  # lazy: CARLA PythonAPI is optional
@@ -43,7 +48,9 @@ __all__ = [
     "CarlaClosedLoopRunner",
     "canonicalize_points",
     "imu_samples_to_array",
+    "occupancy_from_prediction",
     "occupancy_from_points",
+    "select_safety_occupancy",
     "imu_attitude_from_accel",
     "ego_trajectory_to_world",
     "policy_trajectory_to_waypoints",
@@ -73,6 +80,7 @@ class ClosedLoopConfig:
     dt: float = 0.1
     # policy output frame
     policy_frame: str = "ego"       # "ego" | "world"
+    occupancy_source: str = "lidar"  # "lidar" | "learned" | "fused"
     # Ackermann -> CARLA VehicleControl mapping
     max_steering: float = 0.5
     max_accel: float = 3.0
@@ -83,6 +91,13 @@ class ClosedLoopConfig:
     pitch_alarm: float = 0.35       # rad (~20 deg)
     roll_alarm: float = 0.35
     lat_accel_alarm: float = 4.0    # m/s^2
+
+    def __post_init__(self) -> None:
+        if self.policy_frame not in ("ego", "world"):
+            raise ValueError("policy_frame must be 'ego' or 'world'")
+        if self.occupancy_source not in ("lidar", "learned", "fused"):
+            raise ValueError(
+                "occupancy_source must be 'lidar', 'learned' or 'fused'")
 
 
 # --------------------------------------------------------------------------
@@ -131,6 +146,17 @@ def imu_samples_to_array(samples, steps: int) -> np.ndarray:
     return np.asarray(rows[-steps:], dtype=np.float32)
 
 
+def _occupancy_origin(bev_x_range, bev_y_range,
+                      vehicle_state: Optional[VehicleState]) -> tuple:
+    x0, y0 = float(bev_x_range[0]), float(bev_y_range[0])
+    if vehicle_state is None:
+        return x0, y0, 0.0
+    ca, sa = np.cos(vehicle_state.yaw), np.sin(vehicle_state.yaw)
+    return (vehicle_state.x + ca * x0 - sa * y0,
+            vehicle_state.y + sa * x0 + ca * y0,
+            vehicle_state.yaw)
+
+
 def occupancy_from_points(
     points: np.ndarray,
     bev_x_range: Tuple[float, float],
@@ -147,14 +173,7 @@ def occupancy_from_points(
     w = _grid_n(bev_x_range, resolution)
     grid = np.zeros((h, w), dtype=np.float32)
     pts = np.asarray(points, dtype=np.float32)
-    x0, y0 = float(bev_x_range[0]), float(bev_y_range[0])
-    if vehicle_state is None:
-        origin = (x0, y0, 0.0)
-    else:
-        ca, sa = np.cos(vehicle_state.yaw), np.sin(vehicle_state.yaw)
-        origin = (vehicle_state.x + ca * x0 - sa * y0,
-                  vehicle_state.y + sa * x0 + ca * y0,
-                  vehicle_state.yaw)
+    origin = _occupancy_origin(bev_x_range, bev_y_range, vehicle_state)
     if pts.size == 0 or pts.ndim != 2 or pts.shape[1] < 3:
         return OccupancyGrid(grid, resolution=resolution,
                              origin=origin)
@@ -167,6 +186,65 @@ def occupancy_from_points(
     grid[cy[ok], cx[ok]] = 1.0
     return OccupancyGrid(grid, resolution=resolution,
                          origin=origin)
+
+
+def occupancy_from_prediction(
+    prediction,
+    bev_x_range: Tuple[float, float],
+    bev_y_range: Tuple[float, float],
+    resolution: float,
+    vehicle_state: Optional[VehicleState] = None,
+) -> OccupancyGrid:
+    """Convert a planning-oriented occupancy head into the safety grid.
+
+    Only batch-1, channel-1 probabilities are accepted in the online runner;
+    ambiguous shapes and uncalibrated values are rejected fail-safe.
+    """
+    if prediction is None:
+        raise ValueError("learned occupancy is required")
+    value = prediction.detach().cpu().numpy() if hasattr(
+        prediction, "detach") else np.asarray(prediction)
+    h = _grid_n(bev_y_range, resolution)
+    w = _grid_n(bev_x_range, resolution)
+    if value.shape != (1, 1, h, w):
+        raise ValueError(
+            f"learned occupancy shape must be (1,1,{h},{w}), "
+            f"got {value.shape}")
+    grid = np.asarray(value[0, 0], dtype=np.float32)
+    if not np.isfinite(grid).all():
+        raise ValueError("learned occupancy must contain finite values")
+    if np.any(grid < 0.0) or np.any(grid > 1.0):
+        raise ValueError("learned occupancy values must be in [0, 1]")
+    return OccupancyGrid(
+        grid, resolution=resolution,
+        origin=_occupancy_origin(bev_x_range, bev_y_range, vehicle_state))
+
+
+def select_safety_occupancy(
+    points, prediction,
+    bev_x_range: Tuple[float, float],
+    bev_y_range: Tuple[float, float],
+    resolution: float,
+    vehicle_state: VehicleState,
+    source: str,
+) -> OccupancyGrid:
+    """Select an explicit occupancy dependency for planning and safety."""
+    source = str(source).lower()
+    if source not in ("lidar", "learned", "fused"):
+        raise ValueError(f"unsupported occupancy source: {source}")
+    lidar = occupancy_from_points(
+        points, bev_x_range, bev_y_range, resolution,
+        vehicle_state=vehicle_state)
+    if source == "lidar":
+        return lidar
+    learned = occupancy_from_prediction(
+        prediction, bev_x_range, bev_y_range, resolution,
+        vehicle_state=vehicle_state)
+    if source == "learned":
+        return learned
+    return OccupancyGrid(
+        np.maximum(lidar.data, learned.data), resolution=resolution,
+        origin=lidar.origin)
 
 
 def _rotation_align(u: np.ndarray, t: np.ndarray) -> np.ndarray:
@@ -294,6 +372,29 @@ class EpisodeMetrics:
     emergency_stops: int = 0
     raw_policy_risk_steps: int = 0
     post_safety_risk_steps: int = 0
+    sensor_health_failures: int = 0
+    sensor_health_failure_reasons: dict = field(default_factory=dict)
+    sensor_health_latencies_ms: list = field(default_factory=list)
+
+    def record_sensor_health(self, report: SensorHealthReport,
+                             latency_seconds: float) -> None:
+        """Record one gate decision without changing control counters."""
+        self.sensor_health_latencies_ms.append(
+            max(float(latency_seconds), 0.0) * 1000.0)
+        if report.valid:
+            return
+        self.sensor_health_failures += 1
+        for reason in report.reasons:
+            key = reason.value
+            self.sensor_health_failure_reasons[key] = (
+                self.sensor_health_failure_reasons.get(key, 0) + 1)
+
+    def record_sensor_timeout(self) -> None:
+        """Record a missing packet as a health failure before emergency stop."""
+        self.sensor_health_failures += 1
+        key = SensorHealthReason.PACKET_TIMEOUT.value
+        self.sensor_health_failure_reasons[key] = (
+            self.sensor_health_failure_reasons.get(key, 0) + 1)
 
     def update(self, state: VehicleState, prev: Optional[VehicleState],
                config: ClosedLoopConfig) -> None:
@@ -317,6 +418,12 @@ class EpisodeMetrics:
         success = self.reached_goal and self.collisions == 0
         alarms = (self.pitch_alarms + self.roll_alarms
                   + self.lat_accel_alarms)
+        latency_p50 = (float(np.percentile(
+            self.sensor_health_latencies_ms, 50))
+            if self.sensor_health_latencies_ms else 0.0)
+        latency_p95 = (float(np.percentile(
+            self.sensor_health_latencies_ms, 95))
+            if self.sensor_health_latencies_ms else 0.0)
         return {
             "success": success, "collisions": self.collisions,
             "max_impulse": self.max_impulse, "progress": self.progress,
@@ -332,6 +439,11 @@ class EpisodeMetrics:
                 self.raw_policy_risk_steps / max(self.steps, 1)),
             "post_safety_risk_rate": (
                 self.post_safety_risk_steps / max(self.steps, 1)),
+            "sensor_health_failures": self.sensor_health_failures,
+            "sensor_health_failure_reasons": dict(
+                self.sensor_health_failure_reasons),
+            "sensor_health_latency_p50_ms": latency_p50,
+            "sensor_health_latency_p95_ms": latency_p95,
         }
 
 
@@ -343,6 +455,9 @@ def aggregate_episodes(metrics: list) -> dict:
     sums = [m.to_summary() for m in metrics]
     passes = sum(1 for s in sums if s["success"])
     crashes = sum(1 for s in sums if s["collisions"] > 0)
+    health_reasons = Counter()
+    for summary in sums:
+        health_reasons.update(summary["sensor_health_failure_reasons"])
     return {
         "n_episodes": n,
         "pass_rate": passes / n,
@@ -362,6 +477,11 @@ def aggregate_episodes(metrics: list) -> dict:
             [s["raw_policy_risk_rate"] for s in sums])),
         "mean_post_safety_risk_rate": float(np.mean(
             [s["post_safety_risk_rate"] for s in sums])),
+        "total_sensor_health_failures": int(sum(
+            s["sensor_health_failures"] for s in sums)),
+        "sensor_health_failure_reasons": dict(sorted(health_reasons.items())),
+        "max_sensor_health_latency_p95_ms": float(max(
+            s["sensor_health_latency_p95_ms"] for s in sums)),
     }
 
 
@@ -375,13 +495,15 @@ class CarlaSensorStack:
 
     def __init__(self, world, vehicle, config: ClosedLoopConfig,
                  num_cameras: int = 3, image_size: Tuple[int, int] = (192, 192),
-                 lidar_channels: int = 32, lidar_range: float = 50.0):
+                 lidar_channels: int = 32, lidar_range: float = 50.0,
+                 calibration_version: str = "carla-default-v1"):
         if not _HAS_CARLA:
             raise RuntimeError("carla PythonAPI not installed; run inside a "
                                "CARLA environment (`pip install carla`).")
         self._world = world
         self._vehicle = vehicle
         self._config = config
+        self.calibration_version = str(calibration_version)
         self._cam_q = [deque(maxlen=1) for _ in range(num_cameras)]
         self._lidar_q = deque(maxlen=1)
         self._imu_q = deque(maxlen=config.imu_steps)
@@ -428,6 +550,9 @@ class CarlaSensorStack:
         self.last_camera_frames: Tuple[int, ...] = ()
         self.last_lidar_frame = -1
         self.last_imu_frames: Tuple[int, ...] = ()
+        self.last_camera_timestamps: Tuple[float, ...] = ()
+        self.last_lidar_timestamp = float("nan")
+        self.last_imu_timestamps: Tuple[float, ...] = ()
         self.last_sensor_timestamps: dict = {}
 
     def _on_lidar(self, event):
@@ -479,6 +604,10 @@ class CarlaSensorStack:
         imu_timestamps = tuple(
             float(ts) for f, ts, _, _ in self._imu_q if f <= frame
         )[-self._config.imu_steps:]
+        self.last_camera_timestamps = tuple(
+            float(c.timestamp) for c in cams)
+        self.last_lidar_timestamp = float(self._lidar_q[-1][1])
+        self.last_imu_timestamps = imu_timestamps
         self.last_sensor_timestamps = {
             **{f"camera_{i}": float(c.timestamp)
                for i, c in enumerate(cams)},
@@ -513,6 +642,7 @@ class CarlaClosedLoopRunner:
     def __init__(self, world, vehicle, sensors: CarlaSensorStack,
                  perceive: Callable, policy: Callable, safety_filter,
                  controller, config: ClosedLoopConfig,
+                 health_gate: SensorHealthGate,
                  goal: Optional[Tuple[float, float]] = None,
                  max_steps: int = 1000,
                  supervisor: Optional[SafetySupervisor] = None):
@@ -524,10 +654,22 @@ class CarlaClosedLoopRunner:
         self._safety = safety_filter
         self._controller = controller
         self._config = config
+        self._health_gate = health_gate
         self._goal = goal
         self._max_steps = max_steps
         self._supervisor = supervisor or SafetySupervisor(
             SafetySupervisorConfig(expected_frame="world"))
+
+    def _apply_emergency(self, state: VehicleState, metrics: EpisodeMetrics,
+                         timestamp: Optional[float] = None) -> None:
+        emergency_timestamp = 0.0 if timestamp is None else float(timestamp)
+        cmd = self._controller.compute(
+            state, self._supervisor.emergency_trajectory(emergency_timestamp),
+            self._config.dt)
+        self._vehicle.apply_control(
+            carla.VehicleControl(**carla_control_from_command(
+                cmd, self._config)))
+        metrics.emergency_stops += 1
 
     def _state_from_vehicle(self, prev: Optional[VehicleState]) -> VehicleState:
         tr = self._vehicle.get_transform()
@@ -550,20 +692,41 @@ class CarlaClosedLoopRunner:
     def run(self) -> EpisodeMetrics:
         metrics = EpisodeMetrics()
         self._sensors.reset_episode()
+        self._health_gate.reset()
         prev: Optional[VehicleState] = None
         for _ in range(self._max_steps):
             packet = self._sensors.tick()
             if packet is None:
                 state = prev or VehicleState()
-                cmd = self._controller.compute(
-                    state, self._supervisor.emergency_trajectory())
-                self._vehicle.apply_control(
-                    carla.VehicleControl(**carla_control_from_command(
-                        cmd, self._config)))
-                metrics.emergency_stops += 1
+                metrics.record_sensor_timeout()
+                self._apply_emergency(state, metrics)
                 break
             images, points, imu = packet
             state = self._state_from_vehicle(prev)
+            health_started = time.monotonic()
+            health_report = self._health_gate.evaluate(
+                images=images, point_cloud=points, imu_history=imu,
+                frame_id=self._sensors.last_frame,
+                reference_timestamp=(
+                    self._sensors.last_frame * self._config.dt),
+                camera_frames=self._sensors.last_camera_frames,
+                lidar_frame=self._sensors.last_lidar_frame,
+                imu_frames=self._sensors.last_imu_frames,
+                camera_timestamps=getattr(
+                    self._sensors, "last_camera_timestamps", ()),
+                lidar_timestamp=getattr(
+                    self._sensors, "last_lidar_timestamp", float("nan")),
+                imu_timestamps=getattr(
+                    self._sensors, "last_imu_timestamps", ()),
+                calibration_version=getattr(
+                    self._sensors, "calibration_version", None))
+            metrics.record_sensor_health(
+                health_report, time.monotonic() - health_started)
+            if not health_report.valid:
+                self._apply_emergency(
+                    state, metrics,
+                    self._sensors.last_frame * self._config.dt)
+                break
             try:
                 observation = Observation(
                     timestamp=self._sensors.last_frame * self._config.dt,
@@ -574,11 +737,13 @@ class CarlaClosedLoopRunner:
                     lidar_frame=self._sensors.last_lidar_frame,
                     imu_frames=self._sensors.last_imu_frames,
                     sensor_timestamps=self._sensors.last_sensor_timestamps)
-                pts = canonicalize_points(points, self._config.num_points)
                 attitude = imu_attitude_from_accel(imu)
                 model_started = time.monotonic()
-                bev = self._perceive(observation.images, pts,
-                                     observation.imu_history, attitude)
+                perceived = self._perceive(
+                    observation.images, observation.point_cloud,
+                    observation.imu_history, attitude)
+                bev = getattr(perceived, "bev", perceived)
+                learned_occupancy = getattr(perceived, "occupancy", None)
                 traj_raw = self._policy(bev, observation.imu_history)
                 model_latency = time.monotonic() - model_started
                 traj_np = (traj_raw.detach().cpu().numpy()
@@ -588,21 +753,19 @@ class CarlaClosedLoopRunner:
                     traj_np, state, frame=self._config.policy_frame,
                     dt=self._config.dt)
                 traj.timestamp = observation.timestamp
+                occ = select_safety_occupancy(
+                    points, learned_occupancy,
+                    self._config.bev_x_range, self._config.bev_y_range,
+                    self._config.bev_resolution, state,
+                    self._config.occupancy_source)
             except Exception:
-                cmd = self._controller.compute(
-                    state, self._supervisor.emergency_trajectory(),
-                    self._config.dt)
-                self._vehicle.apply_control(
-                    carla.VehicleControl(**carla_control_from_command(
-                        cmd, self._config)))
-                metrics.emergency_stops += 1
+                self._apply_emergency(
+                    state, metrics,
+                    self._sensors.last_frame * self._config.dt)
                 break
             decision = self._supervisor.evaluate(
                 traj, sensor_skew=observation.max_sensor_skew_seconds,
                 model_latency=model_latency)
-            occ = occupancy_from_points(
-                points, self._config.bev_x_range, self._config.bev_y_range,
-                self._config.bev_resolution, vehicle_state=state)
             if (decision.mode is not SafetyMode.EMERGENCY_STOP and traj.length
                     and self._safety.check_collision(traj, occ).any()):
                 metrics.raw_policy_risk_steps += 1

@@ -67,9 +67,8 @@ def export_policy_onnx(path: str, policy: HybridPolicy, device,
                        cfg: HybridPolicyConfig) -> None:
     """Export the deploy path ``(bev, imu) -> trajectory (1, N, 4)``.
 
-    The RSSM posterior uses ``rsample``; tracing bakes a stochastic sample, so
-    for *deterministic* deployment set the RSSM to mean-mode (sample=False) at
-    train/export time. This helper exports the forward as-is for graph
+    ``eval()`` makes the RSSM posterior use its mean, so the exported deploy
+    path is deterministic. This helper exports the forward for graph
     verification (opset 17, dynamic batch). Export runs on CPU (the caller's
     policy is moved to CPU for the call).
     """

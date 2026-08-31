@@ -143,7 +143,7 @@ def test_asymmetric_bev_range_point_placement():
     assert tuple(nz[0].tolist()) == (10, 36)
 
 
-@pytest.mark.parametrize("n_points", [0, 7, 300])
+@pytest.mark.parametrize("n_points", [1, 7, 300])
 def test_point_count_boundaries_and_occupancy(n_points):
     cfg = BEVFusionConfig(num_points=32)
     model = BEVFusion(cfg).eval()
@@ -157,3 +157,15 @@ def test_point_count_boundaries_and_occupancy(n_points):
     assert out.occupancy.shape == (1, 1, model.bev_h, model.bev_w)
     assert torch.isfinite(out.occupancy).all()
     assert torch.all((out.occupancy >= 0) & (out.occupancy <= 1))
+
+
+def test_empty_point_cloud_is_rejected_as_invalid_lidar():
+    cfg = BEVFusionConfig(num_points=32)
+    model = BEVFusion(cfg).eval()
+    images = torch.zeros(
+        1, cfg.num_cameras, cfg.image_channels, *cfg.image_size)
+    points = torch.empty(1, 0, cfg.lidar_in_channels)
+    imu = torch.zeros(1, cfg.imu_steps, cfg.imu_in_channels)
+
+    with pytest.raises(ValueError, match="points must contain at least one"):
+        model(images, points, imu)

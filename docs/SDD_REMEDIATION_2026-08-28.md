@@ -98,3 +98,46 @@ Unit branch coverage: 79.85% (minimum gate: 79%)
 - 回归提升至 `121 passed, 6 skipped`；unit branch coverage 从 `79.85%` 提升至 `80.62%`。
 - 未关闭：真实 CARLA/Gazebo/ROS2/TensorRT、专家/危险数据、Affordance 离线指标、BC/World Model 训练闭环、WorldModel 拆包和 CasADi NMPC。
 - 完整 Gate 矩阵、设计边界与下一轮清单见 `docs/METHOD_FRAMEWORK_REMEDIATION_2026-08-29.md`。
+
+### 2026-08-30 — 参考项目学习后的第三轮整改
+
+- 新增 `configuration.system.load_system_stack()`，由单一严格 YAML 装配感知、策略、安全、控制、闭环、Affordance 与域随机化配置；未知、缺失和漂移均 fail-fast。
+- 打通 `BEVFeature.occupancy → world OccupancyGrid → SafetySupervisor/SafetyFilter`，提供 `lidar/learned/fused` 显式模式；融合采用逐 cell 保守最大值。
+- CARLA 正式评估同时强制 perception/policy checkpoint；`--allow-random-policy` 仅保留双随机模型开发冒烟语义。
+- 新增无需 CARLA 的 FakeRunner 回归，关闭上一轮 runner exception/timeout CPU 编排待办，并验证 learned occupancy 不会替换 policy BEV payload。
+- 回归：`136 passed, 6 skipped`；unit branch coverage `85.27%`，已达到上一轮“提升至 85%”目标。
+- 尚未关闭：OffTerSim backend/heightmap adapter、训练 stage 编排与 task metrics、真实仿真/数据/ROS 2/TensorRT 验收。
+- 详细来源、取舍和下一步 P0/P1/P2 见 `docs/REFERENCE_ARCHITECTURE_REMEDIATION_2026-08-30.md`。
+
+### 2026-08-30 — BEVFusion/仓库边界第四轮整改
+
+- P0 软件契约：完成显式 camera/LiDAR availability mask、全模态缺失拒绝和 BEV 输入 shape fail-fast；安全降级策略与真实传感器健康映射仍待 recorded replay/CARLA 验收。
+- P1 架构：完成 perception encoder/fuser 拆分，保持 Camera/LiDAR 独立 BEV 路径、公开 import 与 state-dict key 兼容。
+- P2 工程化：新增 `docs/README.md`、`src/README.md`、`tests/README.md`、`configs/README.md`，没有为整理目录而破坏历史链接。
+- 全量回归提升为 `151 passed, 6 skipped`；unit branch coverage `85.77%`；新 encoder/fuser 均为 100%。
+- 未关闭：modality dropout 训练 manifest、单模态 occupancy 指标、mask ONNX/ORT/TRT contract、真实 CARLA/Gazebo 与数据验收。
+- 完整映射见 `docs/BEVFUSION_REPOSITORY_REMEDIATION_2026-08-30.md`。
+
+### 2026-08-31 — Sensing/BEV 严格双模态第五轮整改
+
+- P0 软件契约：在线 mask 只接受 Camera/LiDAR 同时有效；空 LiDAR、Camera/LiDAR 非有限数据和单模态 mask 全部 fail-fast。
+- P0 闭环安全：`Observation` 拒绝空 LiDAR，Runner 不再补零伪装有效；FakeRunner 已断言模型不被调用且控制输出最大制动。
+- P1 适配器：CARLA perceiver 显式传入 `(1,2)` bool `[True,True]`；ONNX 四输入保持兼容，图外健康 validator 尚待实现。
+- P2 可维护性：补充 `bev_fusion.py` 关键数据流注释，更新系统 SDD、技术架构、README、DOX 与历史报告状态说明。
+- 回归：`162 passed, 6 skipped`；unit `160 passed, 2 skipped`；branch coverage `85.92%`；flake8 通过。
+- 后续 P0/P1/P2 与部署限制见 `docs/SENSING_BEV_STRICT_VALIDATION_2026-08-31.md`。
+
+### 2026-08-31 — Stage 1A 第六轮整改
+
+- P0 软件健康门禁：关闭统一 health report/reason、Camera 黑屏/过曝/冻结、LiDAR
+  空/稀疏/越界/重复、IMU 窗口/频率/量程/跳变及 age/skew/标定版本检查。
+- P0 闭环安全：CARLA Runner 在 `Observation` 前强制健康判定；任一模态无效
+  跳过模型并最大制动，timeout 同样记录为 health failure。
+- P1 可观测性：EpisodeMetrics 增加失败原因和 p50/p95，新增不可 skip 的
+  1000-case CPU integration 及独立 `metrics.json` 产物。
+- P2 配置与文档：唯一 YAML 严格派生 health 配置，设计规格、实施计划、路线图、
+  SDD/TDD、技术架构和入口文档同步。
+- 回归：`232 passed, 6 skipped`；unit `229 passed, 2 skipped`；branch coverage
+  `87.79%`；health `98.04%`；flake8 通过。
+- 未关闭：Stage 1B 真实 CARLA/ROS 2/C++/执行器/ECU；Stage 2 recorded replay
+  仍未开始，不能因 CPU Gate 完成而宣称数据或物理验收完成。

@@ -93,6 +93,8 @@ def test_observation_rejects_bad_arrays_timestamps_and_frame_metadata():
         Observation(**{**base, "timestamp": np.nan})
     with pytest.raises(ValueError, match="point_cloud"):
         Observation(**{**base, "point_cloud": np.zeros((2, 2))})
+    with pytest.raises(ValueError, match="at least one"):
+        Observation(**{**base, "point_cloud": np.zeros((0, 4))})
     with pytest.raises(ValueError, match="aligned"):
         Observation(**{**base, "images": []})
     with pytest.raises(ValueError, match="imu_frames"):

@@ -41,9 +41,12 @@ CARLA / Gazebo / ONNX / TensorRT / vehicle deployment
 
 ```text
 New_ORAD/
+├── AGENTS.md           # 编码代理的仓库级工作约定
 ├── src/
+│   ├── AGENTS.md       # 源码依赖、运行时契约与模型安全规则
 │   ├── utils/          # 公共数据类型、Observation schema 与 frame 变换
-│   ├── perception/     # Camera/LiDAR/IMU BEV 融合
+│   ├── configuration/  # system.yaml 严格加载与全栈配置装配
+│   ├── perception/     # 独立传感器编码、modality-aware BEV 融合与 heads
 │   ├── affordance/     # 可通行性与地形粗糙度辅助任务
 │   ├── world_model/    # 目标世界模型包；当前主要实现仍位于 policy
 │   ├── policy/         # RSSM、BC/RL、actor/critic、越野 reward
@@ -53,24 +56,60 @@ New_ORAD/
 │   ├── orad_ros2/      # Pure Pursuit 与 ROS 2 控制节点
 │   └── cpp/            # TensorRT C++ API 框架
 ├── scripts/            # 评估 CLI
-├── tests/              # unit / integration / closed_loop
-├── configs/            # 系统、训练与部署配置
+├── tests/
+│   ├── AGENTS.md       # TDD、测试分层与 Mock/Fake 验收边界
+│   └── ...             # unit / integration / closed_loop
+├── configs/
+│   ├── AGENTS.md       # 唯一配置源与严格校验规则
+│   └── system.yaml     # canonical runtime configuration
 ├── launch/             # 计划中的 ROS 2 launch，当前为空
 ├── docs/               # Phase 文档、部署指南与 SDD 审计
+│   ├── AGENTS.md       # 文档证据、状态和日志更新规则
+│   └── README.md       # 文档状态与阅读顺序索引
+├── tests/README.md     # unit/integration/closed-loop 验收边界
+├── src/README.md       # 包职责与单向依赖导航
 └── System_overview.md  # 系统级 SDD
 ```
+
+## 编码代理工作约定
+
+项目只使用大写 `AGENTS.md` 作为长期编码代理约定，不依赖 `Agents.md` 或
+`agents.md` 被自动识别。Codex 从外层到当前工作目录加载适用规则，因此根文件
+保存全项目共同约束，`src/`、`tests/`、`configs/`、`docs/` 的文件只保存各自
+作用域内容易出错且能够验证的规则。
+
+个人通用偏好（例如回复语言和结果汇报形式）应放在用户级
+`~/.codex/AGENTS.md`，不由本仓库维护；本仓库只记录 New_ORAD 可执行、可验证
+的工程约定。
+
+```text
+AGENTS.md
+├── src/AGENTS.md
+├── tests/AGENTS.md
+├── configs/AGENTS.md
+└── docs/AGENTS.md
+```
+
+开始修改前应读取根 `AGENTS.md` 和目标路径上最近的子目录 `AGENTS.md`。
+同目录若未来出现 `AGENTS.override.md`，它会取代该目录的 `AGENTS.md`，而不是
+追加。架构原理、历史进度和临时需求仍分别放在 SDD/过程文档和当前对话中，
+避免代理规则文件膨胀为项目百科。
+
+参考：[官方 AGENTS.md 加载规则](https://learn.chatgpt.com/docs/agent-configuration/agents-md)、
+[官方 Codex 最佳实践](https://learn.chatgpt.com/guides/best-practices)。
 
 ## 模块与实际状态
 
 | 模块 | 已有能力 | 主要缺口 |
 |---|---|---|
-| `utils` | 公共类型、`Observation`、ego/world frame 变换、点云 BEV 投影 | schema version 与跨进程消息契约 |
-| `perception` | 简化 LSS、PointPillars-lite、IMU GRU 融合、Occupancy head | 真实标定、监督数据与精度指标 |
+| `utils` | 公共类型、`Observation`、统一 `SensorHealthGate`/原因枚举、frame 变换、点云 BEV 投影 | schema version 与跨进程消息契约 |
+| `configuration` | 从唯一 YAML 派生 perception/policy/safety/control/sim/health 配置并校验 | 配置 hash 与 checkpoint lineage |
+| `perception` | 独立 Camera/LiDAR/IMU encoder、严格双模态健康 mask、BEV Conv fuser、Occupancy head | 真实标定、监督数据与精度指标 |
 | `affordance` | Traversability/Roughness 双头、masked loss、IMU 弱标签助手 | 数据标签、F1/IoU、离线泛化；默认未接入主链 |
 | `world_model` | SDD 已规划 | 包为空；RSSM/WorldModel 仍在 `policy` |
 | `policy` | 分量加权 BC、RSSM、world-model loss/统计、5-step imagination、actor/critic、reward | dataloader、训练脚本、有效 checkpoint、ADE/RL 指标 |
 | `safety` | 自行车重积分、运动学限制、碰撞截断、SafetySupervisor/fail-safe | CasADi NMPC、C++ 对等实现、环境验收 |
-| `sim` | CARLA 同步传感器、Observation、runner、风险/干预指标 | 真实 CARLA/Gazebo 闭环验收 |
+| `sim` | CARLA 同步传感器、前模型健康门禁、Observation、显式 occupancy、FakeRunner、健康/风险/干预指标 | 真实 CARLA/Gazebo 闭环与物理故障注入 |
 | `deployment` | 感知/策略 ONNX 导出 | ORT/TRT 数值回归、TensorRT engine |
 | `orad_ros2` | Pure Pursuit、Ackermann 节点代码 | 完整依赖、节点集成测试与 launch |
 
@@ -107,11 +146,11 @@ CARLA、ROS 2、Gazebo、CUDA 和 TensorRT 与系统版本高度相关，建议�
 python -m pytest -v
 ```
 
-2026-08-29 方法框架改进后实测：
+2026-08-31 Stage 1A 传感器健康门禁整改后实测：
 
 ```text
-127 collected
-121 passed
+238 collected
+232 passed
 6 skipped
 16 warnings
 ```
@@ -119,8 +158,9 @@ python -m pytest -v
 仅运行 unit 并启用 branch coverage 的基线：
 
 ```text
-119 passed, 2 skipped, 16 warnings
-Total branch coverage: 80.62%
+229 passed, 2 skipped, 16 warnings
+Total branch coverage: 87.79%
+sensor_health.py branch coverage: 98.04%
 ```
 
 当前仍需重点提升 sim/ROS 2/deployment 的环境路径覆盖。详细边界缺口见 [TDD 审计报告](./docs/TDD_AUDIT_2026-08-28.md)。
@@ -133,7 +173,10 @@ python -m pytest -m integration -v
 python -m pytest -m closed_loop -v
 ```
 
-CPU integration 已有两条不可 skip 的 Green contract（全链路和 M0 1000 样本接口门禁）。其余 integration/closed-loop skip 需要专家日志、危险边界数据集、CARLA 越野地图或 Gazebo 悬挂环境。只有这些用例真实执行并达到以下阈值，才可声明系统级完成：
+CPU integration 已有三条不可 skip 的 Green contract（全链路、M0 1000 样本接口
+门禁和 Stage 1A 1000-case 传感器故障矩阵）。其余 integration/closed-loop skip
+需要专家日志、危险边界数据集、CARLA 越野地图或 Gazebo 悬挂环境。只有这些
+用例真实执行并达到以下阈值，才可声明系统级完成：
 
 | 层级 | SDD 目标 |
 |---|---|
@@ -151,6 +194,17 @@ from safety.kinematic_filter import SafetyFilter, SafetyFilterConfig
 perception = BEVFusion(BEVFusionConfig())
 policy = HybridPolicy(HybridPolicyConfig())
 safety = SafetyFilter(SafetyFilterConfig())
+```
+
+正式运行建议从唯一配置源装配，避免模块默认值漂移：
+
+```python
+from configuration.system import load_system_stack
+
+stack = load_system_stack("configs/system.yaml")
+perception = BEVFusion(stack.bev)
+policy = HybridPolicy(stack.policy)
+safety = SafetyFilter(stack.safety)
 ```
 
 主数据 shape 契约：
@@ -183,15 +237,19 @@ python scripts/evaluate_carla_closed_loop.py \
   --host 127.0.0.1 --port 2000 \
   --episodes 10 --max-steps 1000 \
   --goal-x 80 --goal-y 0 \
+  --config configs/system.yaml \
+  --perception-ckpt path/to/bev.pt \
   --policy-ckpt path/to/policy.pt \
-  --policy-frame ego --device cuda
+  --occupancy-source lidar --device cuda
 ```
 
-P0 代码整改已经覆盖 IMU 6D、occupancy/world frame、按 sensor frame 同步和空轨迹制动；正式闭环仍须在 CARLA 环境完成同步、timeout、车辆制动和指标验收。
+`occupancy_source` 支持 `lidar`、`learned` 和逐 cell 最大值融合的 `fused`。默认保持经过 CPU 契约验证的 `lidar`；`learned/fused` 必须在有效 perception checkpoint 和离线占用指标达标后使用。正式评估同时要求 perception/policy checkpoint。
 
 ## 当前最高优先级
 
-- 在真实 CARLA 环境验收同 frame 传感器同步、时间戳 skew、timeout 与最大制动。
+- Stage 1A CPU 健康门禁已关闭；在真实 CARLA 环境完成冻结/频率/标定故障注入、
+  时间戳 skew、timeout 与实际最大制动响应，关闭 Stage 1B。
+- 将同一 health reason/threshold/action 契约接入 ROS 2 与 C++ 图外 runtime。
 - 准备 recorded replay/hazard dataset，关闭 M0 数据门禁和危险边界验收。
 - 为 Terrain Affordance 建立监督标签与 F1/IoU 门槛，达标前保持默认关闭。
 - 建立 BC dataloader/checkpoint/ADE 基线，再推进更长 horizon 的 world-model imagination。
@@ -202,7 +260,7 @@ P0 代码整改已经覆盖 IMU 6D、occupancy/world frame、按 sensor frame �
 建议 TDD 质量门槛：
 
 ```text
-全项目 branch coverage：不得低于 79% 门槛，当前 80.62%，逐步提升至 85%
+全项目 branch coverage：不得低于 79% 门槛，当前 87.79%
 核心 safety branch coverage：≥95%
 新增/修改代码 coverage：≥95%
 P0 fail-safe 分支：100%
@@ -211,6 +269,7 @@ CPU integration contract tests：不得 skip
 
 ## 文档索引
 
+- [文档阅读顺序与状态索引](./docs/README.md)
 - [技术原理与代码架构](./docs/技术原理与代码架构.md)
 - [系统 SDD](./System_overview.md)
 - [Phase 1/2 过程报告](./docs/PHASE2_PROGRESS_REPORT.md)
@@ -220,6 +279,11 @@ CPU integration contract tests：不得 skip
 - [2026-08-28 TDD 严格检验与覆盖率盘点](./docs/TDD_AUDIT_2026-08-28.md)
 - [2026-08-28 P0/P1/P2 整改报告](./docs/SDD_REMEDIATION_2026-08-28.md)
 - [2026-08-29 方法框架 SDD/TDD 跟进记录](./docs/METHOD_FRAMEWORK_REMEDIATION_2026-08-29.md)
+- [2026-08-30 OffTerSim/UniAD 参考架构整改记录](./docs/REFERENCE_ARCHITECTURE_REMEDIATION_2026-08-30.md)
+- [2026-08-30 四项目与 BEVFusion/仓库结构整改记录](./docs/BEVFUSION_REPOSITORY_REMEDIATION_2026-08-30.md)
+- [2026-08-31 Sensing/BEV 严格双模态有效性整改记录](./docs/SENSING_BEV_STRICT_VALIDATION_2026-08-31.md)
+- [2026-08-31 Stage 1A 传感器健康门禁完成记录](./docs/SENSOR_HEALTH_STAGE1A_2026-08-31.md)
+- [工程执行路线与六阶段 Exit Gate](./docs/ENGINEERING_EXECUTION_ROADMAP.md)
 
 ## 定期审计约定
 

@@ -11,15 +11,39 @@ sensors:
   num_points: 256
   imu_steps: 10
   imu_channels: 6
+  calibration_version: carla-default-v1
+sensor_health:
+  max_sensor_age_seconds: 0.2
+  max_sensor_skew_seconds: 0.05
+  black_pixel_threshold: 2
+  saturation_pixel_threshold: 253
+  max_black_ratio: 0.98
+  max_saturation_ratio: 0.98
+  max_consecutive_identical_frames: 2
+  min_lidar_points: 16
+  min_lidar_valid_ratio: 0.8
+  max_lidar_abs_coordinate: 100.0
+  max_lidar_duplicate_ratio: 0.98
+  max_accel_abs: 50.0
+  max_gyro_abs: 5.0
+  max_accel_step_delta: 20.0
+  max_gyro_step_delta: 2.0
+  max_imu_sample_gap_seconds: 0.11
 vehicle:
   wheelbase: 2.5
   max_steering: 0.5
   max_steering_rate: 0.5
+  max_speed: 20.0
   max_accel: 3.0
   max_decel: -5.0
   max_lateral_accel: 4.0
 control:
   dt: 0.1
+runtime:
+  policy_frame: ego
+  # lidar is the validated baseline; learned/fused require a trained
+  # perception checkpoint and occupancy quality evidence.
+  occupancy_source: lidar
 domain_randomization:
   tire_friction: [0.4, 1.4]
   vehicle_mass: [1500.0, 1900.0]

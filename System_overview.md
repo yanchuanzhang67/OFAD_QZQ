@@ -1,6 +1,6 @@
 ## 越野非结构化场景下基于 IL + RL 的端到端自动驾驶系统设计文档 (SDD)
 
-> 2026-08-29 实现状态：系统已加入严格 `Observation`/frame/timestamp 契约、SafetySupervisor 三态 fail-safe、1000 样本 M0 CPU 门禁，以及默认关闭的 Terrain Affordance v1。本文描述目标设计；成熟度与验收证据以 `docs/METHOD_FRAMEWORK_REMEDIATION_2026-08-29.md` 为准。
+> 2026-08-30 实现状态：系统已加入严格 `Observation`/frame/timestamp 契约、SafetySupervisor 三态 fail-safe、1000 样本 M0 CPU 门禁、唯一 YAML 配置装配，以及显式 `lidar/learned/fused` occupancy 安全路由。本文描述目标设计；成熟度与验收以最新整改记录为准。
 
 ### 1. 系统概述 (System Overview)
 1.1 研发背景与目标
@@ -10,6 +10,7 @@
 - 模仿学习（IL）：利用专家驾驶数据快速初始化策略，完成基础地形选择与避障能力的构建。
 - 强化学习（RL）：在世界模型（World Model）隐空间或仿真环境中，结合车辆平稳性、地形通过性与安全约束，进一步迭代优化策略，解决协变量偏移（Covariate Shift）问题。
 - 部署与迁移目标：系统基于算法模块与软硬件解耦设计，首先在 CARLA（算法与传感器验证）和 Gazebo/ROS 2（物理动力学与传感器仿真）中完成闭环验证，最终通过 Sim-to-Real 部署于车载端侧硬件单元
+- 可选仿真扩展：后续以 backend-neutral adapter 接入 OffTerSim/Unity 的程序化越野 heightmap 与 Gym/ROS 2 接口；当前仅完成设计研究，不计入已实现或已验收能力。
 
 
 ### 2系统整体架构设计 (System Architecture)
@@ -48,6 +49,7 @@
     - 多模态特征提取：使用 CNN、Transformer 等模型提取 RGB、点云、IMU 等模态的特征。
     - 特征融合：通过concat、拼接等方式将不同模态特征进行融合，构建高维语义特征表示。
     - 利用 Early/Middle Fusion 提取图像与点云特征，将其映射至统一的 Bird's-Eye-View (BEV) 空间或 3D Occupancy Grid（占据网格）。
+    - Camera 与 LiDAR 必须独立编码到同一 BEV 几何后再融合；显式 `(B,2)` mask 固定为 `[camera_valid, lidar_valid]`，在线样本必须两项均有效，任一模态为空、错形或含非有限值时整帧无效并进入故障安全路径，禁止以补零伪装可用。
     - 融合 IMU 历史动力学状态，消除 Causal Confusion（因果混乱）。
 
 2) 表征与世界模型层 (Representation & World Model)
@@ -64,8 +66,12 @@
     - $R_{\text{jerk}}$：车辆加速度变化率惩罚，减少颠簸感。
 
 4) 安全控制校验与端侧执行层 (Safety & Control)
+- SensorHealthGate：在 `Observation` 和模型计算前检查 Camera/LiDAR/IMU 的
+  shape、finite、frame、timestamp/age/skew、曝光、冻结、稀疏度、范围、频率、
+  跳变与标定版本；任一模态无效时跳过 perception/policy 并进入最大制动。
 - SafetySupervisor：在确定性安全过滤前检查 trajectory frame/shape/finite/速度，以及 sensor age/skew 与 model latency；输出 NORMAL、DEGRADED 或 EMERGENCY_STOP。
 - Safety Filter（安全过滤层）：针对端到端输出的轨迹，接入基于 Kinematic Bicycle Model 或 CasADi 非线性轨迹优化的二次校验层，硬性截断超限转向角与碰撞危险轨迹。
+- Occupancy dependency：默认使用 LiDAR 几何栅格；只有具备有效感知权重和离线指标时才允许选择 learned 或保守 max-fused 栅格。
 - 底层控制：输出阿克曼转向角（Steering Angle）、加速度/制动信号，连接 ROS 2 底层驱动；空/非法/超时轨迹必须输出最大安全制动。
 
 ## 3.测试驱动开发 (TDD) 规划与实施矩阵
@@ -76,7 +82,11 @@
 | 集成测试 (Integration Test) | 感知‑策略‑安全层串联，离线数据回放 (Open‑Loop) | 1. 给定离线专家日志，验证策略输出轨迹与专家轨迹的 ADE / FDE。<br>2. 验证碰撞检测模块对危险边界的 100% 拦截率。 | 开环预测 ADE < 0.3m；离线测试套件安全过滤覆盖率 100%。 |
 | 闭环仿真测试 (Closed‑Loop Test) | CARLA / Gazebo 环境下复杂越野地形闭环行驶 | 1. 连续 20° 陡坡及非结构化乱石路段通过性测试。<br>2. 越野行驶过程中的平稳性（Pitch/Roll 抖动均方差值）。 | 场景成功率（Success Rate）> 90%；碰撞率为 0；车体姿态过载报警次数为 0。 |
 
-2026-08-29 自动化基线：全量 `127 collected / 121 passed / 6 skipped`；unit branch coverage `80.62%`。两条 CPU integration contract 不允许 skip；专家日志、危险数据、CARLA/Gazebo、完整 ROS 2 与目标硬件验收不得由 Mock 结果替代。
+2026-08-31 Stage 1A 自动化基线：全量 `238 collected / 232 passed / 6 skipped`；
+unit `229 passed / 2 skipped`，branch coverage `87.79%`，新增
+`sensor_health.py` 为 `98.04%`。CPU 1000-case 故障矩阵实现错误接受 `0`、最大
+制动率 `100%`、p95 `0.773 ms`。专家日志、危险数据、真实 CARLA/Gazebo、完整
+ROS 2/C++ 与目标硬件验收不得由 Mock/Fake 结果替代。
 
 ## 4.仿真平台搭建与 Sim-to-Real 迁移路线
 

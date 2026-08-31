@@ -2,18 +2,19 @@
 """CARLA closed-loop evaluation entry point (ORAD Phase 5).
 
 Pipeline (per synchronous tick): RGB cameras + LiDAR + IMU -> BEVFusion ->
-HybridPolicy -> SafetyFilter (curvature / lateral-accel / collision) ->
+HybridPolicy -> explicit occupancy routing -> SafetySupervisor/SafetyFilter ->
 PurePursuitController -> carla.VehicleControl. Aggregates pass-rate,
-collision-rate and attitude-stability metrics across episodes.
+collision-rate, safety intervention and attitude-stability metrics.
 
 Usage:
     python scripts/evaluate_carla_closed_loop.py \
         --host 127.0.0.1 --port 2000 --episodes 10 \
-        --goal-x 80 --goal-y 0 [--policy-ckpt policy.pt]
+        --goal-x 80 --goal-y 0 \
+        --perception-ckpt bev.pt --policy-ckpt policy.pt
 
 Requires the CARLA PythonAPI (`pip install carla`) and a running CARLA server
-in synchronous mode. Without `--policy-ckpt` the policy is random-init (smoke
-test only).
+in synchronous mode. Formal evaluation requires perception and policy
+checkpoints; random initialization is available only for explicit smoke tests.
 """
 from __future__ import annotations
 
@@ -30,18 +31,19 @@ if _SRC not in sys.path:
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
-from perception.bev_fusion import BEVFusion, BEVFusionConfig  # noqa: E402
-from policy.hybrid_policy import HybridPolicy, HybridPolicyConfig  # noqa: E402
-from safety.kinematic_filter import SafetyFilter, SafetyFilterConfig  # noqa: E402
+from configuration.system import load_system_stack  # noqa: E402
+from perception.bev_fusion import BEVFusion  # noqa: E402
+from policy.hybrid_policy import HybridPolicy  # noqa: E402
+from safety.kinematic_filter import SafetyFilter  # noqa: E402
 from orad_ros2.vehicle_control_node import (  # noqa: E402
-    PurePursuitController, PurePursuitConfig)
+    PurePursuitController)
 from sim.carla_closed_loop import (  # noqa: E402
-    ClosedLoopConfig, CarlaSensorStack, CarlaClosedLoopRunner,
+    CarlaSensorStack, CarlaClosedLoopRunner,
     aggregate_episodes, _HAS_CARLA)
-from utils.contracts import validate_stack_configs  # noqa: E402
+from utils.sensor_health import SensorHealthGate  # noqa: E402
 
-NUM_CAMERAS = 3
-IMAGE_SIZE = (192, 192)
+DEFAULT_CONFIG = os.path.abspath(
+    os.path.join(_HERE, "..", "configs", "system.yaml"))
 
 
 def build_perceiver(model: BEVFusion, device) -> callable:
@@ -53,10 +55,16 @@ def build_perceiver(model: BEVFusion, device) -> callable:
         pts = torch.from_numpy(points).unsqueeze(0)
         imu_t = torch.from_numpy(imu).unsqueeze(0)
         att = torch.from_numpy(attitude).unsqueeze(0)
+        # 闭环入口显式声明 [Camera, LiDAR] 均有效。Observation 与
+        # BEVFusion 会分别在 schema/张量边界拒绝空、错形或非有限数据；
+        # 因此这里不能用单模态 mask 绕过坏帧。
+        modality_mask = torch.ones(
+            (imgs.shape[0], 2), dtype=torch.bool, device=device)
         with torch.no_grad():
             out = model(imgs.to(device), pts.to(device),
-                        imu_t.to(device), imu_attitude=att.to(device))
-        return out.bev
+                        imu_t.to(device), imu_attitude=att.to(device),
+                        modality_mask=modality_mask)
+        return out
     return perceive
 
 
@@ -83,11 +91,18 @@ def main(argv=None) -> int:
     ap.add_argument("--max-steps", type=int, default=1000)
     ap.add_argument("--goal-x", type=float, default=80.0)
     ap.add_argument("--goal-y", type=float, default=0.0)
+    ap.add_argument("--config", default=DEFAULT_CONFIG,
+                    help="canonical system YAML")
+    ap.add_argument("--perception-ckpt", default=None,
+                    help="BEVFusion state_dict (required for formal evaluation)")
     ap.add_argument("--policy-ckpt", default=None,
                     help="HybridPolicy state_dict (required unless --allow-random-policy)")
     ap.add_argument("--allow-random-policy", action="store_true",
-                    help="development smoke test only; never use for evaluation")
-    ap.add_argument("--policy-frame", default="ego", choices=["ego", "world"])
+                    help="random perception/policy development smoke test only")
+    ap.add_argument("--policy-frame", default=None, choices=["ego", "world"])
+    ap.add_argument("--occupancy-source", default=None,
+                    choices=["lidar", "learned", "fused"],
+                    help="override runtime occupancy source from system YAML")
     ap.add_argument("--device", default="cuda"
                     if torch.cuda.is_available() else "cpu")
     args = ap.parse_args(argv)
@@ -96,25 +111,33 @@ def main(argv=None) -> int:
         raise SystemExit("carla PythonAPI not installed; `pip install carla`")
     device = torch.device(args.device)
     if not args.allow_random_policy:
-        if not args.policy_ckpt:
-            raise SystemExit("--policy-ckpt is required for formal evaluation")
-        if not os.path.isfile(args.policy_ckpt):
-            raise SystemExit(f"policy checkpoint not found: {args.policy_ckpt}")
+        missing = [name for name, value in (
+            ("--perception-ckpt", args.perception_ckpt),
+            ("--policy-ckpt", args.policy_ckpt),
+        ) if not value]
+        if missing:
+            raise SystemExit(
+                f"{', '.join(missing)} required for formal evaluation")
+    for name, path in (("perception", args.perception_ckpt),
+                       ("policy", args.policy_ckpt)):
+        if path and not os.path.isfile(path):
+            raise SystemExit(f"{name} checkpoint not found: {path}")
 
-    bev_model = BEVFusion(
-        BEVFusionConfig(num_cameras=NUM_CAMERAS, image_size=IMAGE_SIZE)
-    ).to(device).eval()
-    policy = HybridPolicy(HybridPolicyConfig()).to(device).eval()
+    stack = load_system_stack(
+        args.config, policy_frame=args.policy_frame,
+        occupancy_source=args.occupancy_source)
+
+    bev_model = BEVFusion(stack.bev).to(device).eval()
+    policy = HybridPolicy(stack.policy).to(device).eval()
+    if args.perception_ckpt:
+        state = torch.load(args.perception_ckpt, map_location=device)
+        bev_model.load_state_dict(state, strict=True)
     if args.policy_ckpt:
-        sd = torch.load(args.policy_ckpt, map_location=device)
-        policy.load_state_dict(sd, strict=True)
-    safety_cfg = SafetyFilterConfig()
-    controller_cfg = PurePursuitConfig()
-    safety = SafetyFilter(safety_cfg)
-    controller = PurePursuitController(controller_cfg)
-    cl_cfg = ClosedLoopConfig(policy_frame=args.policy_frame)
-    validate_stack_configs(bev_model.config, policy.config, safety_cfg,
-                           controller_cfg, cl_cfg)
+        state = torch.load(args.policy_ckpt, map_location=device)
+        policy.load_state_dict(state, strict=True)
+    safety = SafetyFilter(stack.safety)
+    controller = PurePursuitController(stack.controller)
+    cl_cfg = stack.closed_loop
 
     client = connect_carla(args.host, args.port)
     world = client.get_world()
@@ -131,8 +154,10 @@ def main(argv=None) -> int:
     sensors = None
     try:
         sensors = CarlaSensorStack(
-            world, vehicle, cl_cfg, num_cameras=NUM_CAMERAS,
-            image_size=IMAGE_SIZE)
+            world, vehicle, cl_cfg, num_cameras=stack.bev.num_cameras,
+            image_size=stack.bev.image_size,
+            calibration_version=(
+                stack.sensor_health.expected_calibration_version))
         perceive = build_perceiver(bev_model, device)
         policy_call = build_policy_caller(policy, device)
         for ep in range(args.episodes):
@@ -140,6 +165,7 @@ def main(argv=None) -> int:
             runner = CarlaClosedLoopRunner(
                 world, vehicle, sensors, perceive, policy_call,
                 safety, controller, cl_cfg,
+                health_gate=SensorHealthGate(stack.sensor_health),
                 goal=(args.goal_x, args.goal_y),
                 max_steps=args.max_steps)
             m = runner.run()

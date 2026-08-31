@@ -3,6 +3,9 @@
 > 策略输入：`docs/relatetalk.md`  
 > 工程原则：Correctness First → Learning Baseline → Robustness；Red → Green → Refactor  
 > 状态口径：代码骨架 → 单元验证 → 离线验证 → 仿真闭环 → 实车验证
+>
+> 2026-08-30 后续：FakeRunner 异常/超时与 occupancy 路由已完成 CPU Green；
+> 当前状态见 `docs/REFERENCE_ARCHITECTURE_REMEDIATION_2026-08-30.md`。
 
 ## 1. 本轮结论
 
@@ -147,7 +150,7 @@ EMERGENCY_STOP:
 
 - 在固定版本 CARLA server 上记录 camera/LiDAR/IMU frame 与 timestamp，验证 skew/timeout 急停。
 - 使用 recorded replay 重跑 M0 ≥1000 样本，保存无效样本分类和 brake 证据。
-- 为 runner 增加 FakeVehicle/FakeSensorStack 测试，覆盖 perception/policy exception 和 timeout 的控制输出。
+- [已于 2026-08-30 完成 CPU Green] FakeVehicle/FakeSensorStack 覆盖 perception/policy exception、timeout、learned occupancy 缺失与最大制动。
 - 建立 hazard-boundary dataset，验证拦截率 100% 且 post-safety risk 为 0。
 
 ### P1：离线学习闭环

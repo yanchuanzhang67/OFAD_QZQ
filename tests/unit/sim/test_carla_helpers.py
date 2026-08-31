@@ -22,8 +22,10 @@ from sim.carla_closed_loop import (  # noqa: E402
     ego_trajectory_to_world,
     imu_attitude_from_accel,
     imu_samples_to_array,
+    occupancy_from_prediction,
     occupancy_from_points,
     policy_trajectory_to_waypoints,
+    select_safety_occupancy,
 )
 from utils.types import VehicleState  # noqa: E402
 
@@ -94,6 +96,59 @@ def test_occupancy_grid_world_pose_rotates_queries():
                                  vehicle_state=state)
     assert grid.is_occupied(10.0, 7.0)
     assert not grid.is_occupied(12.0, 5.0)
+
+
+def test_learned_occupancy_becomes_world_aware_safety_grid():
+    prediction = np.zeros((1, 1, 2, 2), dtype=np.float32)
+    prediction[0, 0, 1, 1] = 0.9
+    grid = occupancy_from_prediction(
+        prediction, (-1.0, 1.0), (-1.0, 1.0), 1.0,
+        vehicle_state=VehicleState())
+    assert grid.data.shape == (2, 2)
+    assert grid.is_occupied(0.5, 0.5)
+    assert not grid.is_occupied(-0.5, -0.5)
+
+
+def test_safety_occupancy_source_routes_lidar_learned_and_fused():
+    points = np.array([[-0.5, -0.5, 0.0, 1.0]], dtype=np.float32)
+    prediction = np.zeros((1, 1, 2, 2), dtype=np.float32)
+    prediction[0, 0, 1, 1] = 0.9
+    state = VehicleState()
+
+    lidar = select_safety_occupancy(
+        points, prediction, (-1, 1), (-1, 1), 1.0, state, "lidar")
+    learned = select_safety_occupancy(
+        points, prediction, (-1, 1), (-1, 1), 1.0, state, "learned")
+    fused = select_safety_occupancy(
+        points, prediction, (-1, 1), (-1, 1), 1.0, state, "fused")
+
+    assert lidar.is_occupied(-0.5, -0.5)
+    assert not lidar.is_occupied(0.5, 0.5)
+    assert learned.is_occupied(0.5, 0.5)
+    assert not learned.is_occupied(-0.5, -0.5)
+    assert fused.is_occupied(-0.5, -0.5)
+    assert fused.is_occupied(0.5, 0.5)
+
+
+def test_learned_occupancy_contract_rejects_missing_bad_shape_and_range():
+    state = VehicleState()
+    with pytest.raises(ValueError, match="required"):
+        select_safety_occupancy(
+            np.zeros((0, 4)), None, (-1, 1), (-1, 1), 1.0,
+            state, "learned")
+    with pytest.raises(ValueError, match="shape"):
+        occupancy_from_prediction(
+            np.zeros((3, 3)), (-1, 1), (-1, 1), 1.0, state)
+    invalid = np.zeros((1, 1, 2, 2), dtype=np.float32)
+    invalid[0, 0, 0, 0] = 1.1
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        occupancy_from_prediction(
+            invalid, (-1, 1), (-1, 1), 1.0, state)
+
+
+def test_closed_loop_config_rejects_unknown_occupancy_source():
+    with pytest.raises(ValueError, match="occupancy_source"):
+        ClosedLoopConfig(occupancy_source="magic")
 
 
 def test_imu_attitude_level_is_identity():
@@ -176,10 +231,21 @@ def test_episode_metrics_progress_and_alarms():
 def test_aggregate_episodes_rates():
     a = EpisodeMetrics()
     a.reached_goal = True              # success, no collision
+    a.sensor_health_failures = 1
+    a.sensor_health_failure_reasons = {"camera_black": 1}
+    a.sensor_health_latencies_ms = [0.5, 1.0]
     b = EpisodeMetrics()
     b.collisions = 1                   # crash
+    b.sensor_health_failures = 2
+    b.sensor_health_failure_reasons = {
+        "camera_black": 1, "lidar_empty": 1}
+    b.sensor_health_latencies_ms = [2.0]
     out = aggregate_episodes([a, b])
     assert out["n_episodes"] == 2
     assert out["pass_rate"] == 0.5
     assert out["collision_rate"] == 0.5
+    assert out["total_sensor_health_failures"] == 3
+    assert out["sensor_health_failure_reasons"] == {
+        "camera_black": 2, "lidar_empty": 1}
+    assert out["max_sensor_health_latency_p95_ms"] == pytest.approx(2.0)
     assert aggregate_episodes([])["pass_rate"] == 0.0

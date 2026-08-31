@@ -27,9 +27,13 @@
 
 ```
 RGB×3 + LiDAR(N,4) + IMU(T,6)
-   │  canonicalize_points(num_points=256) / imu_attitude_from_accel (Rodrigues 对齐重力)
+   │  Observation: 同帧、非空、shape/finite 校验；失败 → 最大制动
+   │  imu_attitude_from_accel (Rodrigues 对齐重力)
    ▼
-BEVFusion.forward(images(1,N,3,192,192), points(1,256,4), imu(1,10,6), attitude(1,3,3)) → BEVFeature(1,32,50,50)
+BEVFusion.forward(..., modality_mask=[[True,True]])
+   │  Camera/LiDAR 任一无效 → 整帧无效；非空点云在模型内 pad/truncate
+   ▼
+BEVFeature(bev=(1,32,50,50), occupancy=(1,1,50,50))
    ▼
 HybridPolicy.forward(bev, imu) → trajectory(1,N,4) [x,y,heading,v]  (ego 帧)
    │  policy_trajectory_to_waypoints (ego→世界帧，按当前 VehicleState 旋转)
@@ -50,15 +54,26 @@ vehicle.apply_control(carla.VehicleControl(**...))
 # 1) 启动 CARLA（同步模式由脚本自动设置 fixed_delta=dt）
 ./CarlaUE4.sh -quality-level=Epic -benchmark -fps=20
 
-# 2) 闭环评估（无权重=冒烟；带策略权重=真评估）
+# 2) 正式闭环评估（感知与策略权重缺一不可）
 python scripts/evaluate_carla_closed_loop.py \
     --host 127.0.0.1 --port 2000 \
     --episodes 10 --max-steps 1000 \
     --goal-x 80 --goal-y 0 \
+    --config configs/system.yaml \
+    --perception-ckpt exports/perception.pt \
     --policy-ckpt exports/policy.pt \
     --policy-frame ego \
+    --occupancy-source lidar \
     --device cuda
+
+# 仅开发冒烟；随机感知/策略结果不得作为性能或安全验收证据
+python scripts/evaluate_carla_closed_loop.py \
+    --allow-random-policy --episodes 1 --max-steps 20
 ```
+
+正式模式使用 `strict=True` 加载两个 checkpoint。`occupancy-source` 默认
+为 `lidar`；`learned`/`fused` 只有在感知 occupancy 权重与离线指标有效时
+才可用于验收，缺失或非法 learned grid 会触发 fail-safe 制动。
 
 退出码：`pass_rate>0.9 且 collision_rate==0` → 0，否则 1（CI 可直接判定）。
 
@@ -205,7 +220,7 @@ python -m deployment.onnx_export --out-dir exports --image-size 192 \
 ### 3.2 关键约定
 - **opset 17**，仅 batch 轴动态（其余维度静态 → 直接映射 TensorRT optimization profile）。
 - **导出强制 CPU**：`export_*_onnx` 内部 `model.cpu()`。**必须在 CPU 导出**——torch 2.13 在 CUDA 上对含 `rsample` 的 RSSM 图 dynamo 导出会失败（`strict=False/True` 均 ❌），CPU 则成功（已实证）。
-- 策略 deploy 路径含 RSSM 后验采样，trace 会固化一次随机采样；**确定性部署**建议训练/导出时把 RSSM 后验设为 mean-mode（`sample=False`，后续在 `HybridPolicy` 增该开关）。
+- 策略 deploy 路径在 `eval()` 下使用 RSSM 后验均值，导出保持确定性；训练模式仍使用随机采样。
 
 ---
 
@@ -267,7 +282,7 @@ cudaStreamSynchronize(stream);
 | 4 | 延迟预算 | 端到端推理 < 控制周期 `dt=0.1s`；FP16 + async stream；超时 watchdog 回退到安全停车 |
 | 5 | 安全过滤器对等 | C++ `safety_filter_node` 与 Python `SafetyFilter` 数值一致（曲率/侧向加速度封顶同公式） |
 | 6 | 域间隙回归 | 真机回放日志 → 开环 ADE < 阈值；CARLA DR 集训后真机闭环 pass_rate 不降 |
-| 7 | 失效安全 | policy NaN/越界 → `project_to_feasible` 截断；碰撞传感器 → 急停；看门狗超时 → 默认直行减速 |
+| 7 | 失效安全 | Camera/LiDAR 任一空、错形、非有限或健康 mask 无效 → 最大制动；policy NaN/越界、模型异常与看门狗超时 → 故障安全停车 |
 
 ---
 
@@ -278,6 +293,7 @@ cudaStreamSynchronize(stream);
 3. **ONNX 导出必须在 CPU**：`HybridPolicy` 的 RSSM 含 `rsample`，torch 2.13 在 **CUDA** 上 dynamo 导出失败（`strict=False/True` 均 ❌），**CPU** 成功。`export_*_onnx` 已强制 `model.cpu()`。CI 用 CPU 导出，部署机导出后引擎可在 GPU 运行。
 4. **策略帧约定**：policy 输出 ego 相对 `[x_forward, y_left, heading_rel, v]`，`ego_trajectory_to_world` 按当前 `VehicleState` 旋转到世界帧喂 `SafetyFilter`/`PurePursuitController`；若训练策略直接输出世界坐标，CLI 传 `--policy-frame world`。
 5. **外部权重 (.data)**：opset17 导出把大常量写为外部 `.onnx.data`；TensorRT `nvonnxparser` 需把 data 文件与模型同目录或用 `IRuntime` 加载前合并。部署时建议先 `onnx.load`→`save_model` 内联常量，或直接 `trtexec --loadOnnx=`（自动处理）。
+6. **双模态健康校验在图外**：当前 ONNX 保持 images/points/imu/attitude 四输入，等价于 Camera/LiDAR 已通过健康门禁。Python eager 的 NaN/Inf 与空 LiDAR 校验不会成为 ONNX 图节点；ORT/TensorRT/C++ adapter 必须实现同等检查并在失败时最大制动。
 
 ---
 
@@ -292,7 +308,7 @@ cudaStreamSynchronize(stream);
 | P1 | `orad_trt_engine.cpp` 实现 + CMake | 待办（头为框架） |
 | P1 | INT8 校准器 + 回归 | 待闭环达标后启用 |
 | P1 | CARLA 真机闭环（本机无 CARLA） | 脚本就绪，待带 CARLA 环境实跑 |
-| P2 | HybridPolicy RSSM mean-mode 开关 | 确定性部署所需 |
+| ✅ | HybridPolicy RSSM eval mean-mode | 已有确定性重复推理测试；训练模式保留采样 |
 | P2 | Gazebo 悬挂 DR harness | 对接 `tests/closed_loop/test_attitude_stability` |
 | P2 | Phase 2 ISSUE-4/5/6/7 | 沿用 Phase 3/4 遗留，非阻塞 |
 
@@ -303,8 +319,5 @@ cudaStreamSynchronize(stream);
 - Python 3.10.12、torch 2.13.0+cu130（CUDA 可用，但**导出用 CPU**）、onnxscript/onnx 已装；CARLA PythonAPI 未装（`pip install carla` 按需）。
 - 助手单测：`cd /home/qqq/New_ORAD && python -m pytest tests/unit/sim tests/unit/deployment -v`
 - ONNX 导出：`PYTHONPATH=src python -m deployment.onnx_export --out-dir exports --image-size 192`
-- CARLA 闭环：`python scripts/evaluate_carla_closed_loop.py --host 127.0.0.1 --port 2000 --episodes 10 --goal-x 80 --goal-y 0`
+- CARLA 正式闭环：`python scripts/evaluate_carla_closed_loop.py --config configs/system.yaml --host 127.0.0.1 --port 2000 --episodes 10 --goal-x 80 --goal-y 0 --perception-ckpt exports/perception.pt --policy-ckpt exports/policy.pt --occupancy-source lidar`
 - 关键文件：`src/sim/carla_closed_loop.py`（~500 行）、`scripts/evaluate_carla_closed_loop.py`（~150 行）、`src/deployment/onnx_export.py`（~130 行）、`src/cpp/include/orad_trt_engine.hpp`。
-
-
-

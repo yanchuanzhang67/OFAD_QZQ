@@ -56,6 +56,8 @@ class Observation:
         imu = np.asarray(self.imu_history, dtype=np.float32)
         if points.ndim != 2 or points.shape[1] not in (3, 4):
             raise ValueError(f"point_cloud must be (N,3/4), got {points.shape}")
+        if points.shape[0] == 0:
+            raise ValueError("point_cloud must contain at least one LiDAR return")
         if imu.ndim != 2 or imu.shape[1] != 6:
             raise ValueError(f"imu_history must be (T,6), got {imu.shape}")
         if not np.isfinite(points).all() or not np.isfinite(imu).all():
