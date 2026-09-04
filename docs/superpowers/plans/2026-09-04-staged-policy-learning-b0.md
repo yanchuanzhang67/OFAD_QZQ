@@ -43,6 +43,10 @@
 - 2026-09-04 Task 3 Green: replay/expert dataset tests passed (`17 passed`),
   including explicit non-expert rejection and health rejection evidence;
   targeted flake8 exited 0.
+- 2026-09-04 Task 4 Red: metric tests stopped at collection with the expected
+  `ModuleNotFoundError: training.bc_metrics`.
+- 2026-09-04 Task 4 Green: exact-value open-loop metric tests passed
+  (`6 passed`) and targeted flake8 exited 0.
 
 ---
 
@@ -640,7 +644,7 @@ git commit -m "feat: add strict expert BC dataset loader"
 - Produces: `BCMetricAccumulator.update(...)`, `BCMetricAccumulator.compute()` and
   `wrapped_angle_error(prediction, target)`.
 
-- [ ] **Step 1: Write failing exact-value metric tests**
+- [x] **Step 1: Write failing exact-value metric tests**
 
 ```python
 def test_metrics_use_last_valid_waypoint_for_fde_and_ignore_padding():
@@ -664,7 +668,7 @@ def test_heading_metric_wraps_at_pi():
     assert error.item() < 0.03
 ```
 
-- [ ] **Step 2: Write failing validity and grouped-result tests**
+- [x] **Step 2: Write failing validity and grouped-result tests**
 
 ```python
 def test_metrics_reject_nonfinite_and_empty_masks():
@@ -682,7 +686,7 @@ def test_metrics_report_per_episode_groups():
     assert set(result["by_episode"]) == {"episode-a", "episode-b"}
 ```
 
-- [ ] **Step 3: Run the new metric tests and record the Red result**
+- [x] **Step 3: Run the new metric tests and record the Red result**
 
 Run:
 
@@ -692,7 +696,7 @@ python -m pytest -q tests/unit/training/test_bc_metrics.py
 
 Expected: import failure because `training.bc_metrics` does not exist.
 
-- [ ] **Step 4: Implement weighted accumulation**
+- [x] **Step 4: Implement weighted accumulation**
 
 Maintain sums and denominators rather than averaging batch means. ADE uses every valid
 XY distance; FDE uses each sample's last valid index; heading uses wrapped absolute
@@ -716,7 +720,7 @@ class BCMetricAccumulator:
     def compute(self) -> dict[str, object]: ...
 ```
 
-- [ ] **Step 5: Run metric tests and record the Green result**
+- [x] **Step 5: Run metric tests and record the Green result**
 
 Run:
 
@@ -726,7 +730,7 @@ python -m pytest -q tests/unit/training/test_bc_metrics.py
 
 Expected: PASS with exact ADE/FDE tests independent of batch partitioning.
 
-- [ ] **Step 6: Update plan evidence and commit Task 4**
+- [x] **Step 6: Update plan evidence and commit Task 4**
 
 ```bash
 git add src/training/__init__.py src/training/bc_metrics.py \
