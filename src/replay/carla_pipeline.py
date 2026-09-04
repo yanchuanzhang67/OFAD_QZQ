@@ -1,7 +1,7 @@
 """Health-first orchestration for read-only recorded CARLA frames."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import random
 from pathlib import Path
 import time
@@ -25,8 +25,13 @@ from sim.carla_closed_loop import (
     policy_trajectory_to_waypoints,
 )
 from sim.carla_baseline import sha256_file
+from training.bc_artifacts import (
+    load_bc_checkpoint,
+    load_frozen_perception_checkpoint,
+)
 from utils.schema import Observation
 from utils.sensor_health import SensorHealthGate, SensorHealthReport
+from utils.types import EgoDynamicsV1
 
 if TYPE_CHECKING:
     from configuration.system import SystemStackConfig
@@ -49,23 +54,9 @@ class ReplayModelBundle:
     checkpoint_hashes: Mapping[str, str]
     model_performance_valid: bool
     closed_loop_acceptance_valid: bool
-
-
-def _load_state_dict(path: Path) -> Mapping[str, torch.Tensor]:
-    try:
-        payload = torch.load(path, map_location="cpu", weights_only=True)
-    except TypeError:  # pragma: no cover - older supported PyTorch
-        payload = torch.load(path, map_location="cpu")
-    if isinstance(payload, dict) and "state_dict" in payload:
-        payload = payload["state_dict"]
-    if not isinstance(payload, dict):
-        raise ValueError(f"checkpoint {path} does not contain a state dict")
-    for name, value in payload.items():
-        if not isinstance(value, torch.Tensor):
-            raise ValueError(f"checkpoint parameter {name} is not a tensor")
-        if not torch.isfinite(value).all():
-            raise ValueError(f"checkpoint parameter {name} is non-finite")
-    return payload
+    policy_family: str = "hybrid_legacy_random_smoke"
+    policy_checkpoint_schema: Optional[str] = None
+    policy_checkpoint_lineage: Mapping[str, Any] = field(default_factory=dict)
 
 
 def load_model_bundle(
@@ -86,8 +77,8 @@ def load_model_bundle(
     np.random.seed(seed)
     torch.manual_seed(seed)
     perception = BEVFusion(stack.bev).eval()
-    policy = HybridPolicy(stack.policy).eval()
     if perception_checkpoint is None:
+        policy = HybridPolicy(stack.policy).eval()
         return ReplayModelBundle(
             perception=perception,
             policy=policy,
@@ -95,21 +86,33 @@ def load_model_bundle(
             checkpoint_hashes={},
             model_performance_valid=False,
             closed_loop_acceptance_valid=False,
+            policy_family="hybrid_legacy_random_smoke",
         )
     perception_path = Path(perception_checkpoint)
     policy_path = Path(policy_checkpoint)
-    perception.load_state_dict(_load_state_dict(perception_path), strict=True)
-    policy.load_state_dict(_load_state_dict(policy_path), strict=True)
+    perception_hash = load_frozen_perception_checkpoint(
+        perception_path, perception)
+    policy, policy_payload = load_bc_checkpoint(
+        policy_path, stack.bc_policy)
+    policy.eval()
+    lineage = dict(policy_payload["lineage"])
+    if lineage.get("config_sha256") != stack.config_sha256:
+        raise ValueError("policy checkpoint config_sha256 mismatch")
+    if lineage.get("perception_checkpoint_sha256") != perception_hash:
+        raise ValueError("policy checkpoint perception hash mismatch")
     return ReplayModelBundle(
         perception=perception,
         policy=policy,
         model_mode="checkpoint-recorded-replay",
         checkpoint_hashes={
-            "perception": sha256_file(perception_path),
+            "perception": perception_hash,
             "policy": sha256_file(policy_path),
         },
         model_performance_valid=False,
         closed_loop_acceptance_valid=False,
+        policy_family="pure_bc_v1",
+        policy_checkpoint_schema=str(policy_payload["schema_version"]),
+        policy_checkpoint_lineage=lineage,
     )
 
 
@@ -236,6 +239,8 @@ class CarlaReplayPipeline:
             "sensor_age_seconds": prepared.health.max_sensor_age_seconds,
             "sensor_skew_seconds": prepared.health.max_sensor_skew_seconds,
             "model_mode": self.models.model_mode,
+            "policy_family": self.models.policy_family,
+            "policy_checkpoint_schema": self.models.policy_checkpoint_schema,
             "model_performance_valid": self.models.model_performance_valid,
             "closed_loop_acceptance_valid": (
                 self.models.closed_loop_acceptance_valid),
@@ -294,11 +299,36 @@ class CarlaReplayPipeline:
                 if not torch.isfinite(bev).all():
                     raise ValueError("perception BEV output must be finite")
                 stage = "policy"
-                raw_trajectory = self.models.policy(bev, imu)
+                ego = None
+                if self.models.policy_family == "pure_bc_v1":
+                    stage = "policy_input"
+                    ego = torch.from_numpy(
+                        EgoDynamicsV1.from_vehicle_state(
+                            frame.ego_state).to_array()
+                    ).unsqueeze(0).to(device=bev.device, dtype=bev.dtype)
+                    stage = "policy"
+                    raw_trajectory = self.models.policy(
+                        bev, imu.to(device=bev.device, dtype=bev.dtype), ego)
+                elif self.models.policy_family == "hybrid_legacy_random_smoke":
+                    raw_trajectory = self.models.policy(bev, imu)
+                else:
+                    raise ValueError(
+                        f"unsupported replay policy family: "
+                        f"{self.models.policy_family}")
             if not isinstance(raw_trajectory, torch.Tensor):
                 raise TypeError("policy output must be a torch.Tensor")
             if not torch.isfinite(raw_trajectory).all():
                 raise ValueError("policy output must be finite")
+            expected_policy_shape = (
+                1,
+                self.stack.bc_policy.horizon
+                if self.models.policy_family == "pure_bc_v1"
+                else self.stack.policy.horizon,
+                4,
+            )
+            if tuple(raw_trajectory.shape) != expected_policy_shape:
+                raise ValueError(
+                    f"policy output shape must be {expected_policy_shape}")
             model_latency_ms = (time.perf_counter() - model_started) * 1000.0
             stage = "trajectory_contract"
             trajectory = policy_trajectory_to_waypoints(
@@ -331,19 +361,22 @@ class CarlaReplayPipeline:
             command_finite = bool(np.isfinite(list(command.values())).all())
             if not command_finite:
                 raise ValueError("controller command must be finite")
+            shapes = {
+                "images": list(images.shape),
+                "points": list(points.shape),
+                "imu": list(imu.shape),
+                "bev": list(bev.shape),
+                "policy": list(raw_trajectory.shape),
+            }
+            if ego is not None:
+                shapes["ego"] = list(ego.shape)
             record.update({
                 "model_invoked": True,
                 "safety_mode": decision.mode.value,
                 "safety_reason": decision.reason,
                 "command": command,
                 "maximum_brake": self._is_maximum_brake(command),
-                "shapes": {
-                    "images": list(images.shape),
-                    "points": list(points.shape),
-                    "imu": list(imu.shape),
-                    "bev": list(bev.shape),
-                    "policy": list(raw_trajectory.shape),
-                },
+                "shapes": shapes,
                 "finite": {
                     "bev": True, "policy": True, "command": True},
                 "model_latency_ms": model_latency_ms,

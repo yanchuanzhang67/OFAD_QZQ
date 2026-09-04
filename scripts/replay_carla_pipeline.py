@@ -65,6 +65,10 @@ def run(args: argparse.Namespace) -> Path:
         policy_checkpoint=args.policy_checkpoint,
         allow_random_models=args.allow_random_models,
         seed=args.seed)
+    if (models.policy_family == "pure_bc_v1"
+            and models.policy_checkpoint_lineage.get("calibration_sha256")
+            != episode.calibration_sha256):
+        raise ValueError("policy checkpoint calibration_sha256 mismatch")
     git = collect_git_metadata(_ROOT)
     manifest = episode.manifest
     metadata = {
@@ -87,6 +91,10 @@ def run(args: argparse.Namespace) -> Path:
         "calibration_sha256": episode.calibration_sha256,
         "provenance_gaps": list(episode.provenance_gaps),
         "model_mode": models.model_mode,
+        "policy_family": models.policy_family,
+        "policy_checkpoint_schema": models.policy_checkpoint_schema,
+        "policy_checkpoint_lineage": dict(
+            models.policy_checkpoint_lineage),
         "checkpoint_hashes": dict(models.checkpoint_hashes),
         "model_performance_valid": models.model_performance_valid,
         "closed_loop_acceptance_valid": models.closed_loop_acceptance_valid,
@@ -102,6 +110,11 @@ def run(args: argparse.Namespace) -> Path:
         summary = summarize_replay_records(writer.records)
         summary.update({
             "model_mode": models.model_mode,
+            "policy_family": models.policy_family,
+            "policy_checkpoint_schema": models.policy_checkpoint_schema,
+            "policy_checkpoint_lineage": dict(
+                models.policy_checkpoint_lineage),
+            "checkpoint_hashes": dict(models.checkpoint_hashes),
             "model_performance_valid": models.model_performance_valid,
             "closed_loop_acceptance_valid": (
                 models.closed_loop_acceptance_valid),

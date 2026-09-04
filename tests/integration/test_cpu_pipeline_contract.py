@@ -5,10 +5,12 @@ import torch
 
 from orad_ros2.vehicle_control_node import PurePursuitController
 from perception.bev_fusion import BEVFusion, BEVFusionConfig
+from policy.bc_policy import BCPolicy
+from policy.config import BCPolicyConfig
 from policy.hybrid_policy import HybridPolicy, HybridPolicyConfig
 from safety.kinematic_filter import SafetyFilter, SafetyFilterConfig
 from sim.carla_closed_loop import ego_trajectory_to_world, occupancy_from_points
-from utils.types import VehicleState
+from utils.types import EgoDynamicsV1, VehicleState
 
 pytestmark = pytest.mark.integration
 
@@ -35,6 +37,19 @@ def test_cpu_pipeline_shape_frame_safety_contract():
     assert feature.occupancy.shape == (1, 1, 10, 10)
     assert raw.shape == (1, 5, 4)
     assert torch.isfinite(raw).all()
+
+    bc_policy = BCPolicy(BCPolicyConfig(
+        bev_channels=8, bev_h=10, bev_w=10, imu_steps=4,
+        encoder_hidden=16, ego_hidden=8, latent_dim=16, horizon=5)).eval()
+    bc_state = VehicleState(
+        speed=1.0, steering=0.1, vx=0.9, vy=0.1, yaw_rate=0.02,
+        accel_z=9.81)
+    ego_dynamics = torch.from_numpy(
+        EgoDynamicsV1.from_vehicle_state(bc_state).to_array()).unsqueeze(0)
+    with torch.no_grad():
+        bc_raw = bc_policy(feature.bev, imu, ego_dynamics)
+    assert bc_raw.shape == (1, 5, 4)
+    assert torch.isfinite(bc_raw).all()
 
     # Use a known physically meaningful policy trajectory for downstream frame
     # and safety contracts; random untrained network values are not acceptance data.

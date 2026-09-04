@@ -66,6 +66,14 @@
   passed (`2 passed`), including config mismatch rejection and immutable model
   state. The complete training/evaluation focus set passed (`25 passed`), both
   CLI help contracts rendered, and targeted flake8 exited 0.
+- 2026-09-04 Task 8 Red: replay/CPU tests reported seven expected failures:
+  missing bundle family/schema/lineage, BC checkpoint state being routed into
+  HybridPolicy, and Pure BC fake policies not receiving ego dynamics.
+- 2026-09-04 Task 8 Green: replay and CPU contract tests passed (`17 passed`),
+  including exception/NaN/wrong-horizon maximum braking. Broader policy,
+  legacy ONNX and recorded-network regression passed (`33 passed`) with only
+  the pre-existing PyTorch export warnings; targeted flake8 exited 0 after an
+  unused import was removed.
 
 ---
 
@@ -1137,7 +1145,7 @@ git commit -m "feat: add pure BC evaluation workflow"
 - Produces: `ReplayModelBundle.policy_family`, family-aware policy invocation and replay
   metadata that records the exact family and checkpoint lineage.
 
-- [ ] **Step 1: Write failing strict-routing tests**
+- [x] **Step 1: Write failing strict-routing tests**
 
 ```python
 def test_replay_loads_pure_bc_checkpoint_and_routes_ego_dynamics(tmp_path):
@@ -1156,7 +1164,7 @@ def test_replay_never_loads_hybrid_state_into_pure_bc(tmp_path):
         _load_mislabeled_hybrid_checkpoint(tmp_path)
 ```
 
-- [ ] **Step 2: Write a failing CPU sensor-to-control Pure BC test**
+- [x] **Step 2: Write a failing CPU sensor-to-control Pure BC test**
 
 Extend the CPU pipeline test to call:
 
@@ -1171,7 +1179,7 @@ assert torch.isfinite(raw).all()
 Also inject a policy exception and non-finite output into replay, asserting the existing
 emergency command and maximum braking behavior remain unchanged.
 
-- [ ] **Step 3: Run replay and CPU integration tests and record the Red result**
+- [x] **Step 3: Run replay and CPU integration tests and record the Red result**
 
 Run:
 
@@ -1185,7 +1193,7 @@ python -m pytest -q \
 Expected: failures because model bundles lack `policy_family` and replay invokes every
 policy with only `(bev, imu)`.
 
-- [ ] **Step 4: Implement family-aware strict loading and invocation**
+- [x] **Step 4: Implement family-aware strict loading and invocation**
 
 Keep random smoke behavior explicit and unchanged:
 
@@ -1205,7 +1213,7 @@ tensor to the BEV device/dtype. Invoke `policy(bev, imu, ego)`. Any conversion, 
 checkpoint, model output or trajectory-contract error follows the existing maximum-brake
 path. Record `policy_family`, policy schema and checkpoint lineage in run/summary JSON.
 
-- [ ] **Step 5: Run replay and CPU integration tests and record Green**
+- [x] **Step 5: Run replay and CPU integration tests and record Green**
 
 Run:
 
@@ -1219,7 +1227,7 @@ python -m pytest -q \
 Expected: PASS; legacy random smoke remains explicitly non-performance and Pure BC uses
 three inputs with strict checkpoint provenance.
 
-- [ ] **Step 6: Run the broader model-interface regression**
+- [x] **Step 6: Run the broader model-interface regression**
 
 Run:
 
@@ -1233,7 +1241,7 @@ python -m pytest -q \
 Expected: PASS or only pre-existing environment skips; Hybrid ONNX coverage remains
 unchanged because Pure BC deployment is outside this spec.
 
-- [ ] **Step 7: Update plan evidence and commit Task 8**
+- [x] **Step 7: Update plan evidence and commit Task 8**
 
 ```bash
 git add src/replay/carla_pipeline.py scripts/replay_carla_pipeline.py \

@@ -10,12 +10,32 @@ import pytest
 import torch
 
 from configuration.system import load_system_stack
+from perception.bev_fusion import BEVFusion
+from policy.bc_policy import BCPolicy
 import replay.carla_pipeline as pipeline_module
+from training.bc_artifacts import save_bc_checkpoint
 
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parents[3]
 _CONFIG = _ROOT / "configs" / "system.yaml"
+
+
+def _lineage(stack, perception_path):
+    from sim.carla_baseline import sha256_file
+
+    return {
+        "git": {"commit": "a" * 40, "dirty": False},
+        "config_sha256": stack.config_sha256,
+        "dataset_sha256": "2" * 64,
+        "split_sha256": "3" * 64,
+        "calibration_sha256": "4" * 64,
+        "perception_checkpoint_sha256": sha256_file(perception_path),
+        "seed": 41,
+        "resolved_command": "python scripts/train_bc.py",
+        "epoch": 1,
+        "best_metric": 0.25,
+    }
 
 
 def _artifacts_module():
@@ -55,6 +75,9 @@ def test_random_model_loader_is_deterministic_and_explicitly_non_acceptance():
     second_parameter = next(second.perception.parameters()).detach()
     assert torch.equal(first_parameter, second_parameter)
     assert first.model_mode == "random-model-network-smoke"
+    assert first.policy_family == "hybrid_legacy_random_smoke"
+    assert first.policy_checkpoint_schema is None
+    assert first.policy_checkpoint_lineage == {}
     assert first.checkpoint_hashes == {}
     assert first.model_performance_valid is False
     assert first.closed_loop_acceptance_valid is False
@@ -71,6 +94,49 @@ def test_checkpoint_loader_is_strict_and_never_falls_back_to_random(tmp_path):
         pipeline_module.load_model_bundle(
             stack, perception_checkpoint=perception,
             policy_checkpoint=policy, allow_random_models=False, seed=42)
+
+
+def test_replay_loads_pure_bc_checkpoint_and_lineage(tmp_path):
+    stack = load_system_stack(_CONFIG)
+    perception_path = tmp_path / "perception.pt"
+    policy_path = tmp_path / "policy.pt"
+    torch.save(BEVFusion(stack.bev).state_dict(), perception_path)
+    save_bc_checkpoint(
+        policy_path, BCPolicy(stack.bc_policy), None,
+        _lineage(stack, perception_path))
+
+    bundle = pipeline_module.load_model_bundle(
+        stack,
+        perception_checkpoint=perception_path,
+        policy_checkpoint=policy_path,
+        allow_random_models=False,
+        seed=42,
+    )
+
+    assert bundle.policy_family == "pure_bc_v1"
+    assert isinstance(bundle.policy, BCPolicy)
+    assert bundle.policy_checkpoint_schema == "new-orad-policy-checkpoint-v1"
+    assert bundle.policy_checkpoint_lineage["epoch"] == 1
+
+
+def test_replay_rejects_hybrid_checkpoint_family(tmp_path):
+    stack = load_system_stack(_CONFIG)
+    perception_path = tmp_path / "perception.pt"
+    policy_path = tmp_path / "policy.pt"
+    torch.save(BEVFusion(stack.bev).state_dict(), perception_path)
+    torch.save({
+        "schema_version": "new-orad-policy-checkpoint-v1",
+        "model_family": "hybrid_legacy",
+    }, policy_path)
+
+    with pytest.raises(ValueError, match="model_family"):
+        pipeline_module.load_model_bundle(
+            stack,
+            perception_checkpoint=perception_path,
+            policy_checkpoint=policy_path,
+            allow_random_models=False,
+            seed=42,
+        )
 
 
 def test_run_writer_is_transactional_exclusive_and_preserves_gaps(tmp_path):

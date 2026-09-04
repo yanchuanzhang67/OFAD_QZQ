@@ -11,7 +11,7 @@ import torch
 from configuration.system import load_system_stack
 from replay.carla_dataset import RecordedCarlaFrame
 from utils.sensor_health import SensorHealthGate, SensorHealthReason
-from utils.types import VehicleState
+from utils.types import EGO_DYNAMICS_V1_FIELDS, VehicleState
 
 pytestmark = pytest.mark.unit
 
@@ -190,3 +190,82 @@ def test_pipeline_passes_canonical_tensors_through_fake_models() -> None:
         stack.controller.max_accel)
     assert record["maximum_brake"] == (
         record["command"]["accel"] == stack.controller.max_decel)
+
+
+def test_pipeline_routes_ego_dynamics_to_pure_bc_policy() -> None:
+    module = _pipeline_module()
+    stack = load_system_stack(_CONFIG)
+
+    class FakePerception:
+        def __call__(self, images, points, imu, *, modality_mask):
+            return SimpleNamespace(bev=torch.zeros(1, 32, 50, 50))
+
+    class PureBCPolicy:
+        def __init__(self):
+            self.ego = None
+
+        def __call__(self, bev, imu, ego):
+            self.ego = ego
+            trajectory = torch.zeros(1, 20, 4)
+            trajectory[0, :, 0] = torch.arange(1.0, 21.0)
+            trajectory[0, :, 3] = 2.0
+            return trajectory
+
+    policy = PureBCPolicy()
+    models = module.ReplayModelBundle(
+        perception=FakePerception(),
+        policy=policy,
+        model_mode="checkpoint-recorded-replay",
+        checkpoint_hashes={"perception": "1" * 64, "policy": "2" * 64},
+        model_performance_valid=False,
+        closed_loop_acceptance_valid=False,
+        policy_family="pure_bc_v1",
+        policy_checkpoint_schema="new-orad-policy-checkpoint-v1",
+        policy_checkpoint_lineage={"epoch": 1},
+    )
+
+    record = module.CarlaReplayPipeline(
+        stack, SensorHealthGate(stack.sensor_health), models).process(make_frame())
+
+    assert policy.ego is not None
+    assert policy.ego.shape == (1, len(EGO_DYNAMICS_V1_FIELDS))
+    assert policy.ego.tolist() == [[2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
+    assert record["policy_family"] == "pure_bc_v1"
+    assert record["shapes"]["ego"] == [1, 8]
+
+
+@pytest.mark.parametrize("failure", ["exception", "nonfinite", "wrong_shape"])
+def test_pure_bc_policy_failure_uses_maximum_brake(failure) -> None:
+    module = _pipeline_module()
+    stack = load_system_stack(_CONFIG)
+
+    class FakePerception:
+        def __call__(self, images, points, imu, *, modality_mask):
+            return SimpleNamespace(bev=torch.zeros(1, 32, 50, 50))
+
+    class BadPolicy:
+        def __call__(self, bev, imu, ego):
+            if failure == "exception":
+                raise RuntimeError("policy failed")
+            if failure == "nonfinite":
+                return torch.full((1, 20, 4), float("nan"))
+            return torch.zeros(1, 19, 4)
+
+    models = module.ReplayModelBundle(
+        perception=FakePerception(),
+        policy=BadPolicy(),
+        model_mode="checkpoint-recorded-replay",
+        checkpoint_hashes={},
+        model_performance_valid=False,
+        closed_loop_acceptance_valid=False,
+        policy_family="pure_bc_v1",
+    )
+
+    record = module.CarlaReplayPipeline(
+        stack, SensorHealthGate(stack.sensor_health), models).process(make_frame())
+
+    assert record["safety_mode"] == "emergency_stop"
+    assert record["safety_reason"] == "pipeline_exception"
+    assert record["failure_stage"] in {"policy", "trajectory_contract"}
+    assert record["command"]["accel"] == stack.controller.max_decel
+    assert record["maximum_brake"] is True
