@@ -268,6 +268,15 @@ python -m pytest -ra
 
 ## 5. Stage 3 — BC 训练基线
 
+### 2026-09-04 分层策略学习决策
+
+策略研究固定为四级递进实验：B0 `Pure BC`、B1 `Affordance + BC`、B2
+`Affordance + RSSM + BC`、B3 `BC-initialized Dreamer`。当前只进入 B0 设计，
+现有 `HybridPolicy.bc_loss()` 因前向路径经过 single-step RSSM posterior，继续作为
+Hybrid/Dreamer 历史骨架，不能作为 Pure BC 对照组。B0 书面规格见
+`superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md`；该决策不改变
+Stage 3 当前“单元验证”成熟度，也不解除专家数据与正式 perception checkpoint Gate。
+
 ### 目标
 
 以最简单、可解释的 `BEV → BC trajectory` 建立稳定开环基线，然后再考虑

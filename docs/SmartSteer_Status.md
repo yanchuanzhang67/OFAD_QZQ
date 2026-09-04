@@ -421,6 +421,10 @@ expert/hazard、CUDA 和完整 ROS 2 环境路径的 skip 不能计为已完成�
 
 11. 先建立最小 `BEV→BC trajectory` dataloader、train/eval CLI、3-seed checkpoint
     lineage 和 ADE/FDE 基线，再扩大 RSSM/Dreamer/RL。
+    2026-09-04 已确定递进式架构为 B0 `Pure BC` → B1 `Affordance+BC` → B2
+    `Affordance+RSSM+BC` → B3 `BC-initialized Dreamer`；当前只完成架构设计确认，
+    尚未实现新的 B0，也未改变 Stage 3 成熟度。设计见
+    `superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md`。
 12. 用正式 checkpoint 重新运行 recorded replay，先确认严格加载、finite、ADE/FDE、
     occupancy 和安全指标，再允许连接 simulator。
 13. 使用正式 checkpoint 和冻结 scenario manifest 完成至少 30 个 CARLA episodes，
@@ -459,6 +463,7 @@ expert/hazard、CUDA 和完整 ROS 2 环境路径的 skip 不能计为已完成�
 - [初始 CARLA 采集设计](./superpowers/2026-09-01-carla-dataset-collection-design.md)
 - [CARLA 0.9.16 data-first replay 设计](./superpowers/specs/2026-09-03-carla-0916-data-first-replay-design.md)
 - [CARLA 0.9.16 data-first replay 实施记录](./superpowers/plans/2026-09-03-carla-0916-data-first-replay.md)
+- [分层策略学习架构与 B0 Pure BC 设计](./superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md)
 - [真实 episode manifest](../datasets/carla_initial/episodes/episode_20260902T110145Z/episode.json)
 - [真实 calibration](../datasets/carla_initial/episodes/episode_20260902T110145Z/calibration.json)
 - [200 帧 replay summary](../artifacts/carla_replay/replay_20260903T035626Z_9ca5f754/summary.json)

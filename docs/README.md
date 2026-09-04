@@ -39,6 +39,10 @@
   实施计划，按结构化 Canonical、配置驱动采集、只读 loader、health-first replay、
   网络 smoke、artifact 与全量验证七个任务记录 Red/Green 命令和实时证据；本轮
   七项均已完成，真实 CARLA 与正式模型等外部 Gate 继续保持未关闭。
+- `superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md`：固定
+  `Pure BC → Affordance+BC → Affordance+RSSM+BC → BC-initialized Dreamer`
+  的递进式研究架构，并把当前实施范围限定为不经过 RSSM 的 B0 Pure BC；聊天设计
+  已确认，书面规格等待审阅，尚未改变代码成熟度。
 
 ## 审计与整改日志
 
