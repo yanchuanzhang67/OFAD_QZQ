@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 __all__ = ["BCPolicyConfig"]
 
@@ -53,7 +54,10 @@ class BCPolicyConfig:
             raise ValueError("ego_dim must be 8 for ego-dynamics-v1")
         if self.traj_dim != 4:
             raise ValueError("traj_dim must be 4 for [x,y,heading,velocity]")
-        if self.waypoint_dt <= 0:
+        if (isinstance(self.waypoint_dt, bool)
+                or not isinstance(self.waypoint_dt, (int, float))
+                or not math.isfinite(float(self.waypoint_dt))
+                or self.waypoint_dt <= 0):
             raise ValueError("waypoint_dt must be positive")
         weights = {
             "bc_xy_weight": self.bc_xy_weight,
@@ -61,8 +65,12 @@ class BCPolicyConfig:
             "bc_speed_weight": self.bc_speed_weight,
             "bc_smooth_weight": self.bc_smooth_weight,
         }
-        invalid_weights = [name for name, value in weights.items()
-                           if value < 0]
+        invalid_weights = [
+            name for name, value in weights.items()
+            if (isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or value < 0)]
         if invalid_weights:
             raise ValueError(
                 f"Pure BC loss weights must be non-negative: {invalid_weights}")

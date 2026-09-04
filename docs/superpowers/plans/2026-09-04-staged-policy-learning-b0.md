@@ -74,6 +74,15 @@
   legacy ONNX and recorded-network regression passed (`33 passed`) with only
   the pre-existing PyTorch export warnings; targeted flake8 exited 0 after an
   unused import was removed.
+- 2026-09-04 Task 9 verification audit (intermediate): focused B0 tests passed
+  (`92 passed`). The first full unit coverage run passed (`325 passed / 2
+  skipped / 16 warnings`, total branch coverage `86.73%`) but exposed lower
+  changed-module coverage and Python 3.9-incompatible union annotations.
+  After strict validation/negative-path tests and annotation remediation, the
+  focused B0 policy/training set passed (`83 passed`) with aggregate branch
+  coverage `97.90%`: BCPolicy `99%`, config `100%`, artifacts `98%`, dataset
+  `98%`, engine `95%`, metrics `100%`. Python 3.9 AST parsing and targeted
+  flake8 both exited 0.
 
 ---
 

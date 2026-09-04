@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import random
-from typing import Iterable, Mapping
+from typing import Dict, Iterable, Mapping, Union
 
 import numpy as np
 import torch
@@ -105,7 +105,8 @@ def _freeze_perception(perception: nn.Module, device: torch.device) -> None:
 
 
 def _extract_losses(
-        losses: Mapping[str, torch.Tensor | int]) -> tuple[dict[str, float], int]:
+        losses: Mapping[str, Union[torch.Tensor, int]]
+        ) -> tuple[dict[str, float], int]:
     missing = [name for name in _LOSS_NAMES if name not in losses]
     if missing or "valid_waypoints" not in losses:
         raise ValueError(f"BC loss components are missing keys: {missing}")
@@ -131,7 +132,7 @@ class _EpochTotals:
         self.samples = 0
 
     def update(
-            self, losses: Mapping[str, torch.Tensor | int],
+            self, losses: Mapping[str, Union[torch.Tensor, int]],
             batch_size: int) -> None:
         values, valid_waypoints = _extract_losses(losses)
         for name, value in values.items():
@@ -140,10 +141,10 @@ class _EpochTotals:
         self.steps += 1
         self.samples += batch_size
 
-    def result(self) -> dict[str, float | int]:
+    def result(self) -> Dict[str, Union[float, int]]:
         if self.steps == 0 or self.valid_waypoints == 0:
             raise ValueError("BC loader must yield at least one valid batch")
-        result: dict[str, float | int] = {
+        result: Dict[str, Union[float, int]] = {
             f"loss_{name}": total / self.valid_waypoints
             for name, total in self.loss_sums.items()
         }
@@ -177,7 +178,7 @@ def _bev_feature(
 def train_one_epoch(
         perception: nn.Module, policy: BCPolicy,
         loader: Iterable[BCBatch], optimizer: torch.optim.Optimizer,
-        device: torch.device) -> dict[str, float | int]:
+        device: torch.device) -> Dict[str, Union[float, int]]:
     """Train only ``BCPolicy`` while perception remains frozen and grad-free."""
     _freeze_perception(perception, device)
     policy.to(device)

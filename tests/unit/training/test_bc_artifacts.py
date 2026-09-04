@@ -67,6 +67,14 @@ def test_bc_run_writer_is_exclusive_and_publishes_success_last(tmp_path):
     assert json.loads((final / "metrics.json").read_text()) == {"ade_m": 0.2}
     with pytest.raises(FileExistsError):
         BCRunWriter.create(tmp_path, "run-001", {"seed": 41})
+    with pytest.raises(RuntimeError, match="working directory"):
+        writer.complete({"ade_m": 0.1})
+    with pytest.raises(ValueError, match="run_id"):
+        BCRunWriter.create(tmp_path, "../escape", {"seed": 41})
+    blocked = BCRunWriter.create(tmp_path, "run-002", {"seed": 41})
+    blocked.final_path.mkdir()
+    with pytest.raises(FileExistsError):
+        blocked.complete({"ade_m": 0.1})
 
 
 def test_checkpoint_roundtrip_requires_pure_bc_family(tmp_path):
@@ -117,6 +125,105 @@ def test_checkpoint_rejects_wrong_family_config_and_state(tmp_path):
     with pytest.raises(ValueError, match="ego_std"):
         load_bc_checkpoint(tmp_path / "invalid-std.pt", config)
 
+    invalid_shape = dict(payload)
+    invalid_shape["state_dict"] = dict(payload["state_dict"])
+    invalid_shape["state_dict"]["ego_std"] = torch.ones(config.ego_dim - 1)
+    torch.save(invalid_shape, tmp_path / "invalid-std-shape.pt")
+    with pytest.raises(ValueError, match="ego_std.*shape"):
+        load_bc_checkpoint(tmp_path / "invalid-std-shape.pt", config)
+    invalid_mean_shape = dict(payload)
+    invalid_mean_shape["state_dict"] = dict(payload["state_dict"])
+    invalid_mean_shape["state_dict"]["ego_mean"] = torch.zeros(
+        config.ego_dim - 1)
+    torch.save(invalid_mean_shape, tmp_path / "invalid-mean-shape.pt")
+    with pytest.raises(ValueError, match="ego_mean.*shape"):
+        load_bc_checkpoint(tmp_path / "invalid-mean-shape.pt", config)
+
+
+def test_checkpoint_rejects_invalid_payload_lineage_and_tensors(tmp_path):
+    config = _cfg()
+    policy = BCPolicy(config)
+    source = tmp_path / "source.pt"
+    save_bc_checkpoint(source, policy, None, _lineage())
+    payload = torch.load(source, map_location="cpu", weights_only=True)
+
+    with pytest.raises(TypeError, match="policy must be BCPolicy"):
+        save_bc_checkpoint(tmp_path / "bad-policy.pt", object(), None, _lineage())
+    with pytest.raises(TypeError, match="lineage.*mapping"):
+        save_bc_checkpoint(tmp_path / "bad-lineage.pt", policy, None, None)
+    missing_lineage = _lineage()
+    missing_lineage.pop("dataset_sha256")
+    with pytest.raises(ValueError, match="missing keys"):
+        save_bc_checkpoint(
+            tmp_path / "missing-lineage.pt", policy, None, missing_lineage)
+    invalid_hash = _lineage()
+    invalid_hash["dataset_sha256"] = "not-a-hash"
+    with pytest.raises(ValueError, match="dataset_sha256"):
+        save_bc_checkpoint(
+            tmp_path / "invalid-hash.pt", policy, None, invalid_hash)
+    invalid_hex = _lineage()
+    invalid_hex["dataset_sha256"] = "z" * 64
+    with pytest.raises(ValueError, match="dataset_sha256"):
+        save_bc_checkpoint(
+            tmp_path / "invalid-hex.pt", policy, None, invalid_hex)
+    invalid_cases = (
+        ("git", None, "git metadata"),
+        ("seed", -1, "seed"),
+        ("resolved_command", "", "resolved_command"),
+        ("best_metric", float("nan"), "best_metric"),
+    )
+    for name, value, message in invalid_cases:
+        lineage = _lineage()
+        lineage[name] = value
+        with pytest.raises(ValueError, match=message):
+            save_bc_checkpoint(
+                tmp_path / f"invalid-{name}.pt", policy, None, lineage)
+    nested_nonfinite = _lineage()
+    nested_nonfinite["diagnostics"] = [float("nan")]
+    with pytest.raises(ValueError, match="lineage.*non-finite"):
+        save_bc_checkpoint(
+            tmp_path / "nonfinite-lineage.pt", policy, None,
+            nested_nonfinite)
+
+    torch.save([], tmp_path / "not-mapping.pt")
+    with pytest.raises(TypeError, match="payload.*mapping"):
+        load_bc_checkpoint(tmp_path / "not-mapping.pt", config)
+    wrong_schema = dict(payload)
+    wrong_schema["schema_version"] = "old"
+    torch.save(wrong_schema, tmp_path / "wrong-schema.pt")
+    with pytest.raises(ValueError, match="schema_version"):
+        load_bc_checkpoint(tmp_path / "wrong-schema.pt", config)
+    no_lineage = dict(payload)
+    no_lineage.pop("lineage")
+    torch.save(no_lineage, tmp_path / "no-lineage.pt")
+    with pytest.raises(ValueError, match="missing lineage"):
+        load_bc_checkpoint(tmp_path / "no-lineage.pt", config)
+    bad_state = dict(payload)
+    bad_state["state_dict"] = {"parameter": "not-a-tensor"}
+    torch.save(bad_state, tmp_path / "bad-state.pt")
+    with pytest.raises(TypeError, match="named tensors"):
+        load_bc_checkpoint(tmp_path / "bad-state.pt", config)
+    absent_state = dict(payload)
+    absent_state.pop("state_dict")
+    torch.save(absent_state, tmp_path / "absent-state.pt")
+    with pytest.raises(TypeError, match="state_dict.*mapping"):
+        load_bc_checkpoint(tmp_path / "absent-state.pt", config)
+
+
+def test_checkpoint_rejects_nonfinite_optimizer_state(tmp_path):
+    policy = BCPolicy(_cfg())
+    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
+    parameter = next(policy.parameters())
+    optimizer.state[parameter]["step"] = torch.tensor(float("nan"))
+
+    with pytest.raises(ValueError, match="optimizer_state.*non-finite"):
+        save_bc_checkpoint(
+            tmp_path / "nonfinite-optimizer.pt",
+            policy,
+            optimizer,
+            _lineage(),
+        )
+
 
 def test_checkpoint_index_resolves_only_matching_local_weight(tmp_path):
     checkpoint = tmp_path / "epoch-0001.pt"
@@ -130,6 +237,40 @@ def test_checkpoint_index_resolves_only_matching_local_weight(tmp_path):
     payload["sha256"] = "0" * 64
     index.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="hash"):
+        resolve_checkpoint_index(index)
+
+
+def test_checkpoint_index_rejects_unsafe_or_incomplete_references(tmp_path):
+    checkpoint = tmp_path / "epoch.pt"
+    checkpoint.write_bytes(b"weights")
+    with pytest.raises(ValueError, match="epoch"):
+        write_checkpoint_index(tmp_path / "bad-epoch.json", checkpoint, epoch=-1)
+    with pytest.raises(FileNotFoundError):
+        write_checkpoint_index(
+            tmp_path / "missing.json", tmp_path / "missing.pt", epoch=1)
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(ValueError, match="local weight"):
+        write_checkpoint_index(other / "last.json", checkpoint, epoch=1)
+
+    index = tmp_path / "last.json"
+    index.write_text("[]", encoding="utf-8")
+    with pytest.raises(TypeError, match="JSON object"):
+        resolve_checkpoint_index(index)
+    index.write_text(json.dumps({
+        "filename": "../epoch.pt", "sha256": "1" * 64, "epoch": 1,
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="basename"):
+        resolve_checkpoint_index(index)
+    index.write_text(json.dumps({
+        "filename": "epoch.pt", "sha256": "short", "epoch": 1,
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="SHA-256"):
+        resolve_checkpoint_index(index)
+    index.write_text(json.dumps({
+        "filename": "absent.pt", "sha256": "1" * 64, "epoch": 1,
+    }), encoding="utf-8")
+    with pytest.raises(FileNotFoundError):
         resolve_checkpoint_index(index)
 
 
@@ -150,6 +291,12 @@ def test_frozen_perception_checkpoint_is_strict_finite_and_hashed(tmp_path):
     assert all(
         torch.equal(source.state_dict()[name], target.state_dict()[name])
         for name in source.state_dict())
+
+    wrapped_path = tmp_path / "wrapped-perception.pt"
+    torch.save({"state_dict": source.state_dict()}, wrapped_path)
+    wrapped_target = BEVFusion(config)
+    assert len(load_frozen_perception_checkpoint(
+        wrapped_path, wrapped_target)) == 64
 
 
 def test_frozen_perception_checkpoint_rejects_missing_and_nonfinite_state(tmp_path):

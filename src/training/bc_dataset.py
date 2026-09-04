@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Mapping, TYPE_CHECKING
+from typing import Any, Mapping, Optional, TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -87,7 +87,7 @@ class ExpertBCDataset(Dataset):
             split: str, stack: "SystemStackConfig",
             samples: tuple[_SampleReference, ...],
             rejections: tuple[dict[str, Any], ...], split_sha256: str,
-            calibration_sha256: str | None):
+            calibration_sha256: Optional[str]):
         self.manifest_path = manifest_path
         self.manifest = dict(manifest)
         self.split = split
@@ -208,7 +208,13 @@ class ExpertBCDataset(Dataset):
                 if episode_path != root and root not in episode_path.parents:
                     _error("unsafe_episode_path", "episode path escapes manifest root")
                 recorded_hash = str(entry.get("sha256", ""))
-                if len(recorded_hash) != 64:
+                try:
+                    valid_hash = len(recorded_hash) == 64
+                    if valid_hash:
+                        int(recorded_hash, 16)
+                except ValueError:
+                    valid_hash = False
+                if not valid_hash:
                     _error("episode_hash_invalid", "episode sha256 must be 64 hex")
                 tags_raw = entry.get("tags", {})
                 if not isinstance(tags_raw, Mapping):

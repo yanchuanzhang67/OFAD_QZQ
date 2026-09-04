@@ -94,6 +94,37 @@ def test_pure_bc_rejects_nonfloating_input():
         policy(bev, imu, ego.to(torch.int64))
 
 
+def test_pure_bc_rejects_non_tensor_rank_and_batch_mismatch():
+    config = _cfg()
+    policy = BCPolicy(config)
+    bev, imu, ego = _inputs(config, batch=2)
+    with pytest.raises(TypeError, match="bev.*torch.Tensor"):
+        policy(bev.numpy(), imu, ego)
+    with pytest.raises(ValueError, match="bev shape"):
+        policy(bev[0], imu, ego)
+    with pytest.raises(ValueError, match="batch sizes"):
+        policy(bev, imu[:1], ego)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"family": "hybrid"}, "family"),
+        ({"bev_channels": 0}, "dimensions"),
+        ({"ego_dim": 7}, "ego_dim"),
+        ({"traj_dim": 3}, "traj_dim"),
+        ({"waypoint_dt": 0.0}, "waypoint_dt"),
+        ({"waypoint_dt": float("nan")}, "waypoint_dt"),
+        ({"bc_xy_weight": -1.0}, "weights"),
+        ({"bc_xy_weight": float("nan")}, "weights"),
+    ],
+)
+def test_pure_bc_config_rejects_invalid_dimensions_and_weights(
+        overrides, message):
+    with pytest.raises(ValueError, match=message):
+        _cfg(**overrides)
+
+
 def test_ego_normalization_is_a_strict_checkpoint_buffer():
     policy = BCPolicy(_cfg())
     mean = torch.arange(8.0)
@@ -163,6 +194,57 @@ def test_masked_loss_rejects_empty_mask_and_nonfinite_target():
         masked_bc_loss_components(
             prediction, expert,
             torch.ones(1, config.horizon, dtype=torch.bool), config)
+
+
+@pytest.mark.parametrize(
+    ("kind", "message"),
+    [
+        ("prediction_shape", "prediction shape"),
+        ("expert_shape", "expert shape"),
+        ("mask_shape", "valid_mask shape"),
+        ("mask_dtype", "bool dtype"),
+        ("prediction_nonfinite", "prediction.*finite"),
+    ],
+)
+def test_masked_loss_rejects_malformed_prediction_contract(kind, message):
+    config = _cfg()
+    prediction = torch.zeros(1, config.horizon, config.traj_dim)
+    expert = torch.zeros_like(prediction)
+    mask = torch.ones(1, config.horizon, dtype=torch.bool)
+    if kind == "prediction_shape":
+        prediction = prediction[:, :-1]
+        expert = expert[:, :-1]
+        mask = mask[:, :-1]
+    elif kind == "expert_shape":
+        expert = expert[:, :-1]
+    elif kind == "mask_shape":
+        mask = mask[:, :-1]
+    elif kind == "mask_dtype":
+        mask = mask.float()
+    else:
+        prediction[0, 0, 0] = float("inf")
+
+    with pytest.raises((TypeError, ValueError), match=message):
+        masked_bc_loss_components(prediction, expert, mask, config)
+
+
+def test_pure_bc_rejects_nonfinite_decoder_output_and_bc_loss_is_scalar():
+    config = _cfg()
+    policy = BCPolicy(config)
+    bev, imu, ego = _inputs(config, batch=1)
+    expert = torch.zeros(1, config.horizon, config.traj_dim)
+    mask = torch.ones(1, config.horizon, dtype=torch.bool)
+    assert policy.bc_loss(bev, imu, ego, expert, mask).ndim == 0
+
+    class _NonfiniteDecoder(torch.nn.Module):
+        def forward(self, latent):
+            return torch.full(
+                (latent.shape[0], config.horizon, config.traj_dim),
+                float("nan"), device=latent.device)
+
+    policy.decoder = _NonfiniteDecoder()
+    with pytest.raises(ValueError, match="trajectory.*finite"):
+        policy(bev, imu, ego)
 
 
 def test_bc_loss_backpropagates_to_all_three_encoders_and_decoder():

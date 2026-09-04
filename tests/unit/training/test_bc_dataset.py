@@ -170,3 +170,113 @@ def test_manifest_file_hash_matches_file_bytes(tmp_path):
 
     assert dataset.manifest_sha256 == hashlib.sha256(
         manifest.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "code"),
+    [
+        (lambda value: value.update({"schema_version": "old"}),
+         "bc_schema_mismatch"),
+        (lambda value: value.update({"dataset_version": ""}),
+         "dataset_version_missing"),
+        (lambda value: value.update({"fixture": "yes"}),
+         "fixture_flag_invalid"),
+        (lambda value: value.update({"splits": {"train": []}}),
+         "split_schema_invalid"),
+        (lambda value: value["splits"].update({"train": {}}),
+         "split_schema_invalid"),
+    ],
+)
+def test_manifest_header_rejects_invalid_schema_fields(tmp_path, mutation, code):
+    stack = load_system_stack(_CONFIG)
+    payload = {
+        "schema_version": "new-orad-bc-manifest-v1",
+        "dataset_version": "expert-fixture-v1",
+        "calibration_version": "carla-default-v1",
+        "fixture": True,
+        "splits": {"train": [], "validation": [], "test": []},
+    }
+    mutation(payload)
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(DatasetContractError) as exc_info:
+        ExpertBCDataset.open(path, "train", stack)
+
+    assert exc_info.value.code == code
+
+
+def test_manifest_rejects_invalid_json_root_and_split_name(tmp_path):
+    stack = load_system_stack(_CONFIG)
+    invalid_json = tmp_path / "invalid.json"
+    invalid_json.write_text("{", encoding="utf-8")
+    with pytest.raises(DatasetContractError) as exc_info:
+        ExpertBCDataset.open(invalid_json, "train", stack)
+    assert exc_info.value.code == "bc_manifest_invalid"
+
+    list_root = tmp_path / "list.json"
+    list_root.write_text("[]", encoding="utf-8")
+    with pytest.raises(DatasetContractError) as exc_info:
+        ExpertBCDataset.open(list_root, "train", stack)
+    assert exc_info.value.code == "bc_manifest_invalid"
+
+    valid = _write_manifest(tmp_path / "valid.json")
+    with pytest.raises(DatasetContractError) as exc_info:
+        ExpertBCDataset.open(valid, "development", stack)
+    assert exc_info.value.code == "split_name_invalid"
+
+
+@pytest.mark.parametrize(
+    ("entry", "code"),
+    [
+        ("episode", "split_entry_invalid"),
+        ({"episode": "/absolute", "sha256": "1" * 64},
+         "unsafe_episode_path"),
+        ({"episode": "episode", "sha256": "short"},
+         "episode_hash_invalid"),
+        ({"episode": "episode", "sha256": "z" * 64},
+         "episode_hash_invalid"),
+        ({"episode": "episode", "sha256": "1" * 64, "tags": []},
+         "episode_tags_invalid"),
+    ],
+)
+def test_manifest_rejects_malformed_split_entries(tmp_path, entry, code):
+    stack = load_system_stack(_CONFIG)
+    manifest = _write_manifest(tmp_path / "manifest.json", train=[entry])
+
+    with pytest.raises(DatasetContractError) as exc_info:
+        ExpertBCDataset.open(manifest, "train", stack)
+
+    assert exc_info.value.code == code
+
+
+def test_dataset_rejects_multiple_calibration_hashes_in_one_split(tmp_path):
+    stack = load_system_stack(_CONFIG)
+    first = make_episode(
+        tmp_path / "first", complete_provenance=True, expert=True)
+    second = make_episode(
+        tmp_path / "second", complete_provenance=True, expert=True)
+    calibration_path = second / "calibration.json"
+    calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+    calibration["fixture_variant"] = "second"
+    calibration_path.write_text(json.dumps(calibration), encoding="utf-8")
+    episode_manifest_path = second / "episode.json"
+    episode_manifest = json.loads(
+        episode_manifest_path.read_text(encoding="utf-8"))
+    episode_manifest["calibration_sha256"] = hashlib.sha256(
+        calibration_path.read_bytes()).hexdigest()
+    episode_manifest_path.write_text(
+        json.dumps(episode_manifest), encoding="utf-8")
+    manifest = _write_manifest(
+        tmp_path / "manifest.json",
+        train=[_entry(tmp_path, first), _entry(tmp_path, second)])
+
+    with pytest.raises(DatasetContractError) as exc_info:
+        ExpertBCDataset.open(manifest, "train", stack)
+
+    assert exc_info.value.code == "calibration_hash_mismatch"
+
+
+def test_collate_rejects_empty_sample_list():
+    with pytest.raises(ValueError, match="empty"):
+        collate_bc_samples([])

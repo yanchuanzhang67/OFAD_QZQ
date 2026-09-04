@@ -1,7 +1,7 @@
 """Deterministic B0 Behavior-Cloning trajectory policy."""
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -79,7 +79,7 @@ def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 def masked_bc_loss_components(
         prediction: torch.Tensor, expert: torch.Tensor,
         valid_mask: torch.Tensor,
-        config: BCPolicyConfig) -> Dict[str, torch.Tensor | int]:
+        config: BCPolicyConfig) -> Dict[str, Union[torch.Tensor, int]]:
     """Compute the mask-aware, angle-wrapped B0 supervised objective."""
     _validate_loss_inputs(prediction, expert, valid_mask, config)
     xy = _masked_mean(
@@ -122,7 +122,7 @@ def masked_bc_loss_components(
 class BCPolicy(nn.Module):
     """Pure BC policy with BEV, IMU and ego-dynamics encoders."""
 
-    def __init__(self, config: BCPolicyConfig | None = None):
+    def __init__(self, config: Optional[BCPolicyConfig] = None):
         super().__init__()
         self.config = config or BCPolicyConfig()
         c = self.config
@@ -209,7 +209,7 @@ class BCPolicy(nn.Module):
     def bc_loss_components(
             self, bev: torch.Tensor, imu: torch.Tensor, ego: torch.Tensor,
             expert: torch.Tensor,
-            valid_mask: torch.Tensor) -> Dict[str, torch.Tensor | int]:
+            valid_mask: torch.Tensor) -> Dict[str, Union[torch.Tensor, int]]:
         prediction = self.forward(bev, imu, ego)
         return masked_bc_loss_components(
             prediction, expert, valid_mask, self.config)

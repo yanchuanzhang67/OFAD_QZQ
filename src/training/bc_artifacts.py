@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+import math
 import os
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional, Union
 import uuid
 
 import torch
@@ -103,6 +104,21 @@ def _require_tensor_state(
     return state
 
 
+def _validate_finite_tree(value: object, *, context: str) -> None:
+    if isinstance(value, torch.Tensor):
+        if not torch.isfinite(value).all():
+            raise ValueError(f"{context} contains a non-finite tensor")
+    elif isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{context} contains a non-finite scalar")
+    elif isinstance(value, Mapping):
+        for nested in value.values():
+            _validate_finite_tree(nested, context=context)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            _validate_finite_tree(nested, context=context)
+
+
 @dataclass
 class BCRunWriter:
     """Write a run under ``.incomplete`` and publish success atomically."""
@@ -122,7 +138,7 @@ class BCRunWriter:
 
     @classmethod
     def create(
-            cls, root: Path | str, run_id: str,
+            cls, root: Union[Path, str], run_id: str,
             metadata: Mapping[str, Any]) -> "BCRunWriter":
         root_path = Path(root)
         if not run_id or Path(run_id).name != run_id:
@@ -158,12 +174,44 @@ def _validate_lineage(lineage: Mapping[str, Any]) -> dict[str, Any]:
     missing = sorted(REQUIRED_LINEAGE.difference(lineage))
     if missing:
         raise ValueError(f"checkpoint lineage missing keys: {missing}")
+    for name in (
+            "config_sha256", "dataset_sha256", "split_sha256",
+            "calibration_sha256", "perception_checkpoint_sha256"):
+        value = lineage[name]
+        try:
+            valid_hash = isinstance(value, str) and len(value) == 64
+            if valid_hash:
+                int(value, 16)
+        except ValueError:
+            valid_hash = False
+        if not valid_hash:
+            raise ValueError(f"checkpoint lineage {name} must be SHA-256")
+    git = lineage["git"]
+    if (not isinstance(git, Mapping)
+            or not isinstance(git.get("commit"), str)
+            or not git["commit"]
+            or not isinstance(git.get("dirty"), bool)):
+        raise ValueError("checkpoint lineage git metadata is invalid")
+    for name in ("seed", "epoch"):
+        value = lineage[name]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(
+                f"checkpoint lineage {name} must be a non-negative integer")
+    if (not isinstance(lineage["resolved_command"], str)
+            or not lineage["resolved_command"].strip()):
+        raise ValueError("checkpoint lineage resolved_command must be non-empty")
+    best_metric = lineage["best_metric"]
+    if (isinstance(best_metric, bool)
+            or not isinstance(best_metric, (int, float))
+            or not math.isfinite(float(best_metric))):
+        raise ValueError("checkpoint lineage best_metric must be finite")
+    _validate_finite_tree(lineage, context="checkpoint lineage")
     return dict(lineage)
 
 
 def save_bc_checkpoint(
-        path: Path | str, policy: BCPolicy,
-        optimizer: torch.optim.Optimizer | None,
+        path: Union[Path, str], policy: BCPolicy,
+        optimizer: Optional[torch.optim.Optimizer],
         lineage: Mapping[str, Any]) -> None:
     """Exclusively save one immutable Pure BC epoch checkpoint."""
     if not isinstance(policy, BCPolicy):
@@ -172,19 +220,22 @@ def save_bc_checkpoint(
         raise ValueError(f"policy model_family must be {MODEL_FAMILY}")
     state = _require_tensor_state(
         policy.state_dict(), context="BC checkpoint")
+    optimizer_state = optimizer.state_dict() if optimizer else None
+    _validate_finite_tree(
+        optimizer_state, context="BC checkpoint optimizer_state")
     payload = {
         "schema_version": CHECKPOINT_SCHEMA,
         "model_family": MODEL_FAMILY,
         "config": asdict(policy.config),
         "state_dict": dict(state),
-        "optimizer_state": optimizer.state_dict() if optimizer else None,
+        "optimizer_state": optimizer_state,
         "lineage": _validate_lineage(lineage),
     }
     _torch_save_exclusive(Path(path), payload)
 
 
 def load_bc_checkpoint(
-        path: Path | str,
+        path: Union[Path, str],
         expected_config: BCPolicyConfig) -> tuple[BCPolicy, dict[str, Any]]:
     """Strictly reconstruct a Pure BC policy from an audited checkpoint."""
     payload = _torch_load(Path(path))
@@ -199,25 +250,28 @@ def load_bc_checkpoint(
     if "lineage" not in payload:
         raise ValueError("BC checkpoint is missing lineage")
     _validate_lineage(payload["lineage"])
+    _validate_finite_tree(
+        payload.get("optimizer_state"),
+        context="BC checkpoint optimizer_state")
     state = _require_tensor_state(
         payload.get("state_dict"), context="BC checkpoint")
 
+    mean = state.get("ego_mean")
+    if mean is not None and mean.shape != (expected_config.ego_dim,):
+        raise ValueError("BC checkpoint ego_mean has invalid shape")
+    std = state.get("ego_std")
+    if std is not None and std.shape != (expected_config.ego_dim,):
+        raise ValueError("BC checkpoint ego_std has invalid shape")
+    if std is not None and not (std > 1e-6).all():
+        raise ValueError("BC checkpoint ego_std must be finite and positive")
+
     policy = BCPolicy(expected_config)
     policy.load_state_dict(state, strict=True)
-    if policy.ego_mean.shape != (expected_config.ego_dim,):
-        raise ValueError("BC checkpoint ego_mean has invalid shape")
-    if policy.ego_std.shape != (expected_config.ego_dim,):
-        raise ValueError("BC checkpoint ego_std has invalid shape")
-    if not torch.isfinite(policy.ego_mean).all():
-        raise ValueError("BC checkpoint ego_mean must be finite")
-    if (not torch.isfinite(policy.ego_std).all()
-            or not (policy.ego_std > 1e-6).all()):
-        raise ValueError("BC checkpoint ego_std must be finite and positive")
     return policy, dict(payload)
 
 
 def write_checkpoint_index(
-        index_path: Path | str, checkpoint_path: Path | str,
+        index_path: Union[Path, str], checkpoint_path: Union[Path, str],
         *, epoch: int) -> None:
     """Atomically point ``best.json`` or ``last.json`` to a local weight."""
     index = Path(index_path)
@@ -236,7 +290,7 @@ def write_checkpoint_index(
     _write_bytes_atomic(index, _json_bytes(payload))
 
 
-def resolve_checkpoint_index(index_path: Path | str) -> Path:
+def resolve_checkpoint_index(index_path: Union[Path, str]) -> Path:
     """Resolve and hash-check a local checkpoint index."""
     index = Path(index_path)
     payload = json.loads(index.read_text(encoding="utf-8"))
@@ -257,7 +311,7 @@ def resolve_checkpoint_index(index_path: Path | str) -> Path:
 
 
 def load_frozen_perception_checkpoint(
-        path: Path | str, perception: nn.Module) -> str:
+        path: Union[Path, str], perception: nn.Module) -> str:
     """Strictly load finite perception weights, then freeze the module."""
     checkpoint_path = Path(path)
     payload = _torch_load(checkpoint_path)

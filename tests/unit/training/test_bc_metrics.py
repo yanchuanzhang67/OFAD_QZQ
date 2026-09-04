@@ -120,3 +120,65 @@ def test_metric_accumulation_is_invariant_to_batch_partitioning():
     separate_result = separate.compute()
     for name in ("ade_m", "fde_m", "heading_mae_rad", "velocity_mae_mps"):
         assert together_result[name] == pytest.approx(separate_result[name])
+
+
+@pytest.mark.parametrize("max_speed", [0.0, -1.0, float("nan")])
+def test_metrics_reject_invalid_max_speed(max_speed):
+    with pytest.raises(ValueError, match="max_speed"):
+        BCMetricAccumulator(max_speed=max_speed)
+
+
+@pytest.mark.parametrize(
+    ("kind", "error", "message"),
+    [
+        ("prediction_type", TypeError, "torch.Tensor"),
+        ("prediction_shape", ValueError, "prediction shape"),
+        ("target_shape", ValueError, "target shape"),
+        ("mask_shape", ValueError, "valid_mask shape"),
+        ("mask_dtype", TypeError, "bool dtype"),
+        ("episode_ids", ValueError, "episode_ids"),
+        ("tags", ValueError, "tags length"),
+        ("target_nonfinite", ValueError, "target.*finite"),
+    ],
+)
+def test_metrics_reject_malformed_batch_contract(kind, error, message):
+    prediction = torch.zeros(1, 3, 4)
+    target = torch.zeros_like(prediction)
+    mask = torch.ones(1, 3, dtype=torch.bool)
+    episode_ids = ["episode-a"]
+    tags = [{"terrain": "dirt"}]
+    if kind == "prediction_type":
+        prediction = prediction.numpy()
+    elif kind == "prediction_shape":
+        prediction = torch.zeros(1, 3, 3)
+        target = torch.zeros_like(prediction)
+    elif kind == "target_shape":
+        target = target[:, :-1]
+    elif kind == "mask_shape":
+        mask = mask[:, :-1]
+    elif kind == "mask_dtype":
+        mask = mask.float()
+    elif kind == "episode_ids":
+        episode_ids = []
+    elif kind == "tags":
+        tags = []
+    else:
+        target[0, 0, 0] = float("inf")
+
+    with pytest.raises(error, match=message):
+        BCMetricAccumulator(max_speed=12.0).update(
+            prediction, target, mask,
+            episode_ids=episode_ids, tags=tags)
+
+
+def test_single_waypoint_metrics_have_zero_transition_diagnostics():
+    prediction = torch.zeros(1, 1, 4)
+    accumulator = BCMetricAccumulator(max_speed=12.0)
+    accumulator.update(
+        prediction, prediction.clone(), torch.ones(1, 1, dtype=torch.bool),
+        episode_ids=["episode-a"])
+
+    result = accumulator.compute()
+
+    assert result["reverse_waypoint_rate"] == 0.0
+    assert result["smoothness_m"] == 0.0
