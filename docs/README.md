@@ -7,7 +7,8 @@
 
 - `SmartSteer_Status.md`：2026-09-04 当前项目状态总览，按软件边界 `6/6`、正式
   里程碑 `2/8` 和 M0 样本 `200/1000` 三种口径统计进度，并汇总完整代码架构、
-  Canonical 参数、B0 Pure BC 单元验证、数据流、未解决问题和关键执行顺序。
+  Canonical 参数、B0 `9/9` 软件任务、提交级过程追溯、数据流、未解决问题和关键
+  执行顺序。
 - `../README.md`：项目入口、安装、运行与当前能力。
 - `../System_overview.md`：系统级 SDD 与验收目标。
 - `技术原理与代码架构.md`：算法原理、数据契约和代码映射。
@@ -18,7 +19,8 @@
 - `SENSING_BEV_STRICT_VALIDATION_2026-08-31.md`：当前 Camera/LiDAR 严格
   双模态有效性契约、TDD 证据与闭环 fail-safe 数据流。
 - `ENGINEERING_EXECUTION_ROADMAP.md`：从传感器健康、recorded replay、BC、
-  CARLA、ORT/TensorRT 到 ROS 2/SIL/HIL 的当前执行任务与 Exit Gate。
+  CARLA、ORT/TensorRT 到 ROS 2/SIL/HIL 的当前执行任务与 Exit Gate；新增工作包
+  实施/验收双维快照，避免把代码完成度当作正式 Gate 完成度。
 - `SENSOR_HEALTH_STAGE1A_2026-08-31.md`：Stage 1A 统一健康门禁、1000-case
   故障矩阵、最大制动和延迟证据；Stage 1B 环境边界保持待验收。
 - `CARLA_STAGE1B_TASK1_BASELINE_2026-08-31.md`：Stage 1B Task 1 固定 CARLA
@@ -47,7 +49,7 @@
 - `superpowers/plans/2026-09-04-staged-policy-learning-b0.md`：B0 Pure BC 的九任务
   TDD 实施计划，覆盖动力学/配置契约、确定性网络、专家数据、指标、checkpoint、
   train/eval CLI、recorded replay、全量验证和实时文档证据；已按内联方式执行，
-  Task 1–8 已完成，Task 9 记录最终验证与文档同步。
+  Task 1–9 已完成，末尾记录最终验证、外部 Gate 和未生成性能 checkpoint 的事实。
 
 ## 审计与整改日志
 

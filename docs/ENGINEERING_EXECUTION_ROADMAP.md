@@ -29,8 +29,8 @@
   16 warnings`，branch coverage `87.93%`。
 - 2026-09-04 复核：recorded 软件边界连通度为 `6/6`，但正式里程碑只关闭
   `2/8`；Stage 2 数量为 `200/1000` 且缺标签/split/完整 provenance。本机无
-  `carla` Python 模块，当前关键路径仍是 clean commit→真实 Task 1→真实 Task 2→
-  完整 provenance M0 数据→BC checkpoint，而不是继续扩展随机模型功能。
+  `carla` Python 模块。B0 软件基线已由 `0c53375..5e7eab8` 和文档提交 `4b9812f`
+  原子化记录；正式实验仍必须选择一个 clean commit，并绑定全部 lineage。
 - 2026-09-04 B0 软件实施：独立 `pure_bc_v1`、严格专家 dataset、开环指标、冻结
   perception train/eval、可追溯 checkpoint 与 replay 路由达到**单元验证**。当前
   episode 不是专家数据，故没有生成正式模型或关闭 Stage 3 Exit Gate。最终回归为
@@ -46,6 +46,32 @@
 | 4. 真实 CARLA 闭环 | 代码骨架 | 缺固定环境、场景清单、正式权重和真实 episode 证据 |
 | 5. ORT/TensorRT | 代码骨架 | 缺 ORT/TRT 数值回归、C++ runtime、目标硬件延迟和图外健康门禁 |
 | 6. ROS 2/SIL/HIL | 代码骨架 | 缺强类型消息、完整节点图、SIL/HIL 台架和车辆级安全验收 |
+
+### 1.1 当前工作包快照
+
+| 工作包 | 实施进度 | 验收进度 | 下一关闭条件 |
+|---|---:|---:|---|
+| Stage 1A HealthGate | 软件任务已完成 | 离线验证 | 进入 Stage 1B 后补真实传感器/执行器证据 |
+| Stage 1B Task 1 | 工具已完成 | `0/3` 正式 repetitions | CARLA 0.9.16 三次一致且 `reproducible=true` |
+| Stage 1B Task 2 | 工具已完成 | `0` 个正式 summary（目标 ≥1000 ticks） | false rejection、skew、age、latency 全部达标 |
+| Data-first replay | `7/7` 任务 | 200 帧离线验证 | 完整 provenance、冻结 split、1000+ 样本和 hazard/occupancy 标签 |
+| B0 Pure BC | `9/9` 软件任务 | `0/3` 正式 seeds | 专家数据、frozen perception、ADE/FDE/heading/speed 达标 |
+| B1/B2/B3 | `0/3` 阶段 | 无 | B0 冻结 test Gate 关闭后逐级设计与消融 |
+| 训练模型 CARLA 闭环 | 入口存在 | `0/30` 正式 episodes | 冻结 scenario、正式权重和闭环安全指标达标 |
+| Deployment/SIL/HIL | 部分代码骨架 | `0` 个正式 Gate | ORT/TRT parity、ROS 2 graph、SIL/HIL 故障停车证据 |
+
+推荐执行顺序保持为：
+
+```text
+真实 Stage 1B Task 1/2
+  → 完整 provenance 的 Stage 2 M0 数据与专家 split
+  → B0 seeds 41/42/43 训练和冻结 test
+  → 正式 Pure BC recorded/CARLA 验证
+  → B1 Affordance+BC
+  → B2 Affordance+RSSM+BC
+  → B3 BC-initialized Dreamer
+  → ORT/TRT 与 ROS 2/SIL/HIL
+```
 
 ## 2. 全阶段共同规则
 

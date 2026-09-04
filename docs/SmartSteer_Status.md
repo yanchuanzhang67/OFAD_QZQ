@@ -73,7 +73,50 @@ Task 1 三次真实基线、Stage 1B Task 2 真实 1000+ ticks、Stage 2 M0 数�
 离线指标、真实 CARLA 模型闭环、部署/SIL/HIL/车辆。`25%` 是 Gate 数量比，不是
 工时或产品可用度估算。
 
-### 0.2 Pipeline 当前到达程度
+### 0.2 工作包与验收进度
+
+以下数字分别描述“软件任务是否完成”“运行边界是否连通”“正式证据是否关闭”，
+不能相加或平均为一个项目总百分比：
+
+| 进度对象 | 已完成 / 目标 | 当前结论 |
+|---|---:|---|
+| Data-first recorded replay 实施计划 | `7/7` 任务 | loader、HealthGate-first replay、网络 smoke、事务化 artifact 和文档均完成，整体为**离线验证** |
+| B0 Pure BC 实施计划 | `9/9` 任务 | 配置、网络、专家 loader、指标、checkpoint、train/eval、replay、验证和文档均完成，整体为**单元验证** |
+| Recorded 主链软件边界 | `6/6` | HealthGate→Observation→BEV→Policy→Safety→Control 已实际执行 |
+| 正式工程里程碑 | `2/8` | 已关闭公共契约/严格配置和 Stage 1A；环境、数据、模型、部署 Gate 仍开 |
+| Stage 2 M0 最低数据量 | `200/1000` | 20% 数量下限；不代表专家标签、split、场景覆盖或 provenance 达标 |
+| B0 正式训练 seed | `0/3` | seeds `41/42/43` 尚无性能有效 checkpoint 与冻结 test 报告 |
+| 正式 CARLA 模型闭环 | `0/30` episodes | 尚未进入冻结场景的训练模型闭环验收 |
+| 后续学习阶段 | `0/3` | B1 Affordance+BC、B2 Affordance+RSSM+BC、B3 Dreamer 均未开始实施 |
+
+因此，“当前已经完成”的准确含义是：基础安全/配置和 recorded 软件链路可复现，B0
+开发任务全部完成；但从研究结论看，B0 还没有专家数据上的性能结果，整个系统仍只有
+`2/8` 正式 Gate 关闭。
+
+### 0.3 研发流程与当前停点
+
+```text
+公共 schema / 唯一配置                         已完成：单元验证
+        ↓
+Stage 1A SensorHealthGate + CPU 故障矩阵       已完成：离线验证
+        ↓
+Stage 1B CARLA baseline / normal health 工具   软件完成：单元验证
+        ↓                                       环境证据待运行
+CARLA 0.9.16 初始采集 + recorded replay        200 帧：离线验证
+        ↓                                       M0 仍为 200/1000
+B0 Pure BC 软件基线                            9/9：单元验证
+        ↓                                       当前停点
+正式专家数据 + frozen perception + 3 seeds     尚未开始正式运行
+        ↓
+B1 Affordance+BC → B2 RSSM+BC → B3 Dreamer     尚未实施
+        ↓
+正式 CARLA 闭环 → ORT/TRT → ROS 2/SIL/HIL      尚未验收
+```
+
+当前不应继续扩展 B1–B3。最近的可执行主路径是先补齐 Stage 1B/M0 数据 provenance，
+构造 episode 级冻结专家 split 和严格 perception checkpoint，再运行 B0 三个固定 seed。
+
+### 0.4 Pipeline 当前到达程度
 
 - 数据与接口层：完整到达控制输出，shape、finite、frame/timestamp、标定和
   fail-safe 路径已有自动化证据。
@@ -220,6 +263,26 @@ Manager 且 `expert_labels=false`，不能直接作为正式 BC 专家标签。
 
 成熟度：安全与 CPU 编排为 **离线验证**；ONNX 为 **单元验证**；
 ROS 2/TensorRT 为 **代码骨架**；无 SIL/HIL 或车辆验证。
+
+### 1.9 B0 开发过程与提交追溯
+
+B0 按“先设计、再计划、逐任务 Red→Green、最后全量验证和文档同步”的顺序内联实施。
+提交没有混入原始数据、历史 artifact 或用户工作区文件：
+
+| 过程阶段 | 提交 | 结果 |
+|---|---|---|
+| 分层架构设计 | `388b3f9` | 固定 B0→B1→B2→B3 的单变量递进关系 |
+| B0 TDD 计划 | `27949e3` | 固定 9 个任务、接口、Red/Green 命令与 Gate |
+| 配置与动力学契约 | `0c53375` | `pure_bc_v1`、`EgoDynamicsV1`、跨模块一致性 |
+| 确定性 Pure BC | `74d61cf` | 三分支 encoder、GRU decoder、masked BC loss |
+| 专家数据与指标 | `1e18f4c`、`cb01288` | 严格 manifest/HealthGate、ADE/FDE/heading/speed |
+| Artifact 与训练评估 | `3ea53b8`、`79f26dc`、`803ea4f` | lineage checkpoint、train/eval engine 和 CLI |
+| Recorded replay 接入 | `4ad4a4c` | family-aware 严格加载、EgoDynamics 输入和 fail-safe |
+| 验证边界加固 | `5e7eab8` | Python 3.9、non-finite、schema/family/lineage 负路径 |
+| 文档与最终证据 | `4b9812f` | SDD、路线图、状态、设计/计划和验证结果同步 |
+
+详细的逐任务预期失败、Green 测试和最终验收记录位于
+[B0 Pure BC TDD 实施计划](./superpowers/plans/2026-09-04-staged-policy-learning-b0.md)。
 
 ## 2. 当前代码架构
 
@@ -476,7 +539,10 @@ expert/hazard、CUDA 和完整 ROS 2 环境路径的 skip 不能计为已完成�
 14. 依次完成 PyTorch→ORT→TensorRT FP32/FP16 parity、ROS 2 SIL、HIL 和独立车辆
     安全 Gate；在此之前不进入 INT8 或开放道路测试。
 
-## 6. 2026-09-04 验证结果
+## 6. 2026-09-04 B0 实施任务验证结果
+
+以下数字来自 B0 实施任务的最终验收记录和提交 `4b9812f`；本次进度文档整理没有
+修改 Python 行为，因此只执行文档链接与格式检查，没有重新运行代码测试：
 
 - B0 聚焦套件（contracts、config、policy、training、replay、CLI、CPU pipeline）：
   `139 passed / 0 skipped`；
