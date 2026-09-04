@@ -34,6 +34,10 @@
   the expected `ImportError` for missing `EGO_DYNAMICS_V1_FIELDS`.
 - 2026-09-04 Task 1 Green: focused config/contract tests passed (`26 passed`);
   targeted flake8 exited 0.
+- 2026-09-04 Task 2 Red: `tests/unit/policy/test_bc_policy.py` stopped at
+  collection with the expected `ModuleNotFoundError: policy.bc_policy`.
+- 2026-09-04 Task 2 Green: Pure BC policy tests passed (`13 passed`), legacy
+  HybridPolicy regression passed (`8 passed`), and targeted flake8 exited 0.
 
 ---
 
@@ -278,7 +282,7 @@ git commit -m "feat: define pure BC runtime contracts"
   `masked_bc_loss_components(prediction, expert, valid_mask, config)` and
   `BCPolicy.bc_loss_components(bev, imu, ego, expert, valid_mask)`.
 
-- [ ] **Step 1: Write failing architecture and determinism tests**
+- [x] **Step 1: Write failing architecture and determinism tests**
 
 ```python
 def test_pure_bc_forward_is_deterministic_and_has_no_world_model():
@@ -306,7 +310,7 @@ def test_pure_bc_rejects_nonfinite_inputs(input_name):
         policy(values["bev"], values["imu"], values["ego"])
 ```
 
-- [ ] **Step 2: Write failing normalization and loss tests**
+- [x] **Step 2: Write failing normalization and loss tests**
 
 ```python
 def test_ego_normalization_is_a_strict_checkpoint_buffer():
@@ -335,7 +339,7 @@ def test_masked_loss_wraps_heading_and_ignores_padding():
     assert losses["valid_waypoints"] == 2
 ```
 
-- [ ] **Step 3: Run the new test file and record the Red result**
+- [x] **Step 3: Run the new test file and record the Red result**
 
 Run:
 
@@ -345,7 +349,7 @@ python -m pytest -q tests/unit/policy/test_bc_policy.py
 
 Expected: import failure because `policy.bc_policy` does not exist.
 
-- [ ] **Step 4: Implement deterministic encoders and decoder**
+- [x] **Step 4: Implement deterministic encoders and decoder**
 
 Define the private MLP helper and deterministic decoder in the same file:
 
@@ -416,7 +420,7 @@ where three consecutive mask values are true; reject a sample with no valid
 waypoint. Return scalar tensors `xy`, `heading`, `speed`, `smooth`, `total` and
 an integer `valid_waypoints`.
 
-- [ ] **Step 5: Run the policy tests and record the Green result**
+- [x] **Step 5: Run the policy tests and record the Green result**
 
 Run:
 
@@ -427,7 +431,7 @@ python -m pytest -q tests/unit/policy/test_bc_policy.py
 Expected: PASS; all policy parameters receiving the supervised path have finite,
 non-zero gradients in the gradient test.
 
-- [ ] **Step 6: Verify the legacy HybridPolicy regression**
+- [x] **Step 6: Verify the legacy HybridPolicy regression**
 
 Run:
 
@@ -437,7 +441,7 @@ python -m pytest -q tests/unit/policy/test_hybrid_policy.py
 
 Expected: existing HybridPolicy tests PASS unchanged.
 
-- [ ] **Step 7: Update plan evidence and commit Task 2**
+- [x] **Step 7: Update plan evidence and commit Task 2**
 
 ```bash
 git add src/policy/bc_policy.py src/policy/__init__.py \
