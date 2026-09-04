@@ -11,6 +11,7 @@ requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
 dependencies = [
     "numpy>=1.20",
+    "Pillow>=9.0",
     "pyyaml>=6.0",
 ]
 

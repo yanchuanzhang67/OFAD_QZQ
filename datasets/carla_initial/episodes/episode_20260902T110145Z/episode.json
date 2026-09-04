@@ -1,0 +1,37 @@
+{
+  "schema_version": "new-orad-carla-v1",
+  "status": "complete",
+  "action_source": "traffic_manager_smoke",
+  "expert_labels": false,
+  "carla_client_version": "0.9.16",
+  "carla_server_version": "0.9.16",
+  "map": "Carla/Maps/Town10HD_Opt",
+  "weather": {
+    "cloudiness": 20.0,
+    "precipitation": 0.0,
+    "precipitation_deposits": 0.0,
+    "wind_intensity": 10.0,
+    "sun_azimuth_angle": 300.0,
+    "sun_altitude_angle": 45.0,
+    "fog_density": 2.0,
+    "fog_distance": 0.75,
+    "fog_falloff": 0.10000000149011612,
+    "wetness": 0.0,
+    "scattering_intensity": 1.0,
+    "mie_scattering_scale": 0.029999999329447746,
+    "rayleigh_scattering_scale": 0.03310000151395798,
+    "dust_storm": 0.0
+  },
+  "fixed_delta_seconds": 0.1,
+  "random_seed": 42,
+  "start_frame": 1044974,
+  "end_frame": 1045173,
+  "sample_count": 200,
+  "collision_count": 0,
+  "goal_world_m": [
+    -41.491477966308594,
+    111.9452896118164,
+    0.5999999642372131
+  ],
+  "wall_time_seconds": 10.671999999998661
+}

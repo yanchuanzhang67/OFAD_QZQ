@@ -5,6 +5,9 @@
 
 ## 当前基线
 
+- `SmartSteer_Status.md`：2026-09-04 当前项目状态总览，按软件边界 `6/6`、正式
+  里程碑 `2/8` 和 M0 样本 `200/1000` 三种口径统计进度，并汇总完整代码架构、
+  Canonical 参数、数据流、未解决问题和关键执行顺序。
 - `../README.md`：项目入口、安装、运行与当前能力。
 - `../System_overview.md`：系统级 SDD 与验收目标。
 - `技术原理与代码架构.md`：算法原理、数据契约和代码映射。
@@ -18,9 +21,24 @@
   CARLA、ORT/TensorRT 到 ROS 2/SIL/HIL 的当前执行任务与 Exit Gate。
 - `SENSOR_HEALTH_STAGE1A_2026-08-31.md`：Stage 1A 统一健康门禁、1000-case
   故障矩阵、最大制动和延迟证据；Stage 1B 环境边界保持待验收。
+- `CARLA_STAGE1B_TASK1_BASELINE_2026-08-31.md`：Stage 1B Task 1 固定 CARLA
+  版本、地图、车辆、随机种子和传感器配置，记录三次时序一致性验收入口；当前为
+  单元验证，真实 CARLA 证据待生成。
+- `CARLA_STAGE1B_TASK2_SENSOR_HEALTH_2026-09-01.md`：Stage 1B Task 2 无模型
+  CARLA Sensor→HealthGate、1000-tick false rejection/skew/latency 统计与 world
+  timestamp 修正；当前为单元验证，真实 CARLA 指标待生成。
 - `superpowers/specs/2026-08-31-sensor-health-stage1-design.md` 与
   `superpowers/plans/2026-08-31-sensor-health-stage1.md`：本轮设计规格和 TDD
   实施计划。
+- `superpowers/specs/2026-09-03-carla-0916-data-first-replay-design.md`：将真实
+  初始 episode 提升为 CARLA 0.9.16 Canonical 事实锚点，统一采集配置，并规定
+  recorded SensorHealthGate→BEV→Policy→Safety→Control 网络 smoke 的安全与追溯边界；
+  设计已于 2026-09-03 书面确认，当前实现成熟度为离线验证；随机模型结果不具备
+  模型性能或闭环验收效力。
+- `superpowers/plans/2026-09-03-carla-0916-data-first-replay.md`：上述设计的 TDD
+  实施计划，按结构化 Canonical、配置驱动采集、只读 loader、health-first replay、
+  网络 smoke、artifact 与全量验证七个任务记录 Red/Green 命令和实时证据；本轮
+  七项均已完成，真实 CARLA 与正式模型等外部 Gate 继续保持未关闭。
 
 ## 审计与整改日志
 

@@ -88,6 +88,43 @@ unit `229 passed / 2 skipped`，branch coverage `87.79%`，新增
 制动率 `100%`、p95 `0.773 ms`。专家日志、危险数据、真实 CARLA/Gazebo、完整
 ROS 2/C++ 与目标硬件验收不得由 Mock/Fake 结果替代。
 
+2026-09-01 当前软件回归：全量 `267 collected / 259 passed / 8 skipped`；unit
+`256 passed / 2 skipped`，branch coverage `88.34%`。新增两个 CARLA Stage 1B
+环境用例均保持 skip，未替代真实仿真证据。
+
+2026-09-03 Stage 1B Task 1 的当前 Canonical 已统一为 CARLA `0.9.16`、
+`Town10HD_Opt`、Lincoln MKZ 2020、seed `42`、0.1 s 控制周期，以及三路具名
+Camera/LiDAR/IMU 的位姿与采样属性。配置 loader 同时生成 Camera optical→CARLA→
+New_ORAD 标定矩阵，collector 和 `CarlaSensorStack` 均消费同一结构。该能力当前为
+单元验证；只有真实
+CARLA 生成的 manifest、三个 repetition trace 和 `reproducible=true` summary
+才能把本 Task 提升为仿真闭环验证。
+
+2026-09-01 Stage 1B Task 2 已增加无模型的 CARLA Sensor→HealthGate 正常流评估，
+对 1000+ ticks 记录 false rejection、sensor age/skew、frame/IMU continuity 和
+health latency。CARLA health reference timestamp 已改为同 tick world snapshot 的
+`elapsed_seconds`，避免非零 frame 起点造成错误 stale。当前仍缺真实 CARLA
+`summary.json`，不能据 CPU 测试确认现有阈值不会误杀真实正常帧。
+
+2026-09-03 新增只读 recorded replay 边界。现有 CARLA 0.9.16 episode 的 200 帧
+完整回放中，199 帧通过 HealthGate 并进入 calibration-aware BEVFusion 与
+HybridPolicy，1 帧因启动期 `imu_accel_range + imu_jump` 在模型前拒绝；全部已处理
+网络边界 finite。随机模型模式明确不构成模型性能或 CARLA 闭环证据。该链路为
+离线验证，artifact 位于 `artifacts/carla_replay/replay_20260903T035626Z_9ca5f754`。
+历史 episode 未记录 vehicle/config/calibration hash，报告保留三个 provenance gaps。
+
+2026-09-03 当前软件回归：全量 `292 passed / 8 skipped / 16 warnings`；unit
+`275 passed / 2 skipped / 16 warnings`，branch coverage `87.93%`，其中
+`sensor_health.py` 为 `98%`。八项 skip 分别依赖真实 CARLA 坡地、Gazebo、Task 1
+在线基线、Task 2 在线健康流、专家日志、hazard 数据、CUDA 和完整 ROS 2 环境，
+均不计为已验收。
+
+2026-09-04 复核未发现新的代码变化：全量仍为 `292 passed / 8 skipped /
+16 warnings`，unit branch coverage 仍为 `87.93%`。当前 recorded 软件链路 6 个
+边界全部连通，但按严格配置、Stage 1A、Stage 1B Task 1/2、M0 数据、训练模型离线
+指标、真实 CARLA 模型闭环、部署/车辆定义的 8 个里程碑只关闭 `2/8`。本机
+`import carla` 仍失败，因此不提升仿真成熟度。
+
 ## 4.仿真平台搭建与 Sim-to-Real 迁移路线
 
 ```

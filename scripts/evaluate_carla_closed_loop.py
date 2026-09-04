@@ -41,6 +41,8 @@ from sim.carla_closed_loop import (  # noqa: E402
     CarlaSensorStack, CarlaClosedLoopRunner,
     aggregate_episodes, _HAS_CARLA)
 from utils.sensor_health import SensorHealthGate  # noqa: E402
+from sim.carla_baseline import (  # noqa: E402
+    carla_sensor_attributes, validate_carla_environment)
 
 DEFAULT_CONFIG = os.path.abspath(
     os.path.join(_HERE, "..", "configs", "system.yaml"))
@@ -146,7 +148,16 @@ def main(argv=None) -> int:
     settings.fixed_delta_seconds = cl_cfg.dt
     world.apply_settings(settings)
     bp_lib = world.get_blueprint_library()
-    veh_bp = bp_lib.find("vehicle.tesla.model3")
+    validate_carla_environment(
+        stack.carla_baseline,
+        client_version=client.get_client_version(),
+        server_version=client.get_server_version(),
+        map_name=world.get_map().name,
+        available_blueprints=tuple(bp.id for bp in bp_lib),
+        fixed_delta_seconds=world.get_settings().fixed_delta_seconds,
+        expected_control_period=cl_cfg.dt)
+    np.random.seed(stack.carla_baseline.random_seed)
+    veh_bp = bp_lib.find(stack.carla_baseline.vehicle_blueprint)
     spawn_pts = world.get_map().get_spawn_points()
     vehicle = world.spawn_actor(veh_bp, spawn_pts[0])
 
@@ -157,7 +168,10 @@ def main(argv=None) -> int:
             world, vehicle, cl_cfg, num_cameras=stack.bev.num_cameras,
             image_size=stack.bev.image_size,
             calibration_version=(
-                stack.sensor_health.expected_calibration_version))
+                stack.sensor_health.expected_calibration_version),
+            sensor_attributes=carla_sensor_attributes(
+                stack.carla_baseline, stack.bev.image_size),
+            baseline=stack.carla_baseline)
         perceive = build_perceiver(bev_model, device)
         policy_call = build_policy_caller(policy, device)
         for ep in range(args.episodes):

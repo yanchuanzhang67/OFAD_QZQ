@@ -1,9 +1,11 @@
 from types import SimpleNamespace
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import sim.carla_closed_loop as closed_loop
+from configuration.system import load_system_stack
 from orad_ros2.vehicle_control_node import PurePursuitController
 from safety.kinematic_filter import SafetyFilter, SafetyFilterConfig
 from sim.carla_closed_loop import CarlaClosedLoopRunner, ClosedLoopConfig
@@ -93,6 +95,14 @@ class _CalibrationMismatchSensors(_Sensors):
     calibration_version = "test-cal-v2"
 
 
+class _NonZeroWorldFrameSensors(_Sensors):
+    last_frame = 107
+    last_camera_frames = (107,)
+    last_lidar_frame = 107
+    last_imu_frames = (106, 107)
+    last_reference_timestamp = 0.7
+
+
 def _health_config(**overrides):
     values = {
         "num_cameras": 1,
@@ -128,6 +138,70 @@ def _install_fake_carla(monkeypatch):
     monkeypatch.setattr(
         closed_loop, "carla",
         SimpleNamespace(VehicleControl=lambda **kwargs: kwargs), raising=False)
+
+
+def test_sensor_stack_spawns_exact_structured_canonical_sensors(monkeypatch):
+    class Location:
+        def __init__(self, x=0.0, y=0.0, z=0.0):
+            self.x, self.y, self.z = x, y, z
+
+    class Rotation:
+        def __init__(self, roll=0.0, pitch=0.0, yaw=0.0):
+            self.roll, self.pitch, self.yaw = roll, pitch, yaw
+
+    class Transform:
+        def __init__(self, location=None, rotation=None):
+            self.location = location or Location()
+            self.rotation = rotation or Rotation()
+
+    class Blueprint:
+        def __init__(self, blueprint_id):
+            self.id = blueprint_id
+            self.attributes = {}
+
+        def set(self, name, value):
+            self.attributes[name] = value
+
+    class Library:
+        def find(self, blueprint_id):
+            return Blueprint(blueprint_id)
+
+    class Sensor:
+        def listen(self, callback):
+            self.callback = callback
+
+    class World:
+        def __init__(self):
+            self.spawned = []
+
+        def get_blueprint_library(self):
+            return Library()
+
+        def spawn_actor(self, blueprint, transform, attach_to=None):
+            self.spawned.append((blueprint, transform))
+            return Sensor()
+
+    fake_carla = SimpleNamespace(
+        Location=Location, Rotation=Rotation, Transform=Transform)
+    monkeypatch.setattr(closed_loop, "_HAS_CARLA", True)
+    monkeypatch.setattr(closed_loop, "carla", fake_carla, raising=False)
+    stack = load_system_stack(
+        Path(__file__).parents[3] / "configs" / "system.yaml")
+    world = World()
+
+    closed_loop.CarlaSensorStack(
+        world, object(), stack.closed_loop,
+        num_cameras=stack.bev.num_cameras,
+        image_size=stack.bev.image_size,
+        calibration_version=stack.sensor_health.expected_calibration_version,
+        baseline=stack.carla_baseline)
+
+    cameras = world.spawned[:3]
+    assert [item[0].attributes["fov"] for item in cameras] == [
+        "90.0", "90.0", "100.0"]
+    assert cameras[2][1].rotation.pitch == -15.0
+    assert world.spawned[3][0].attributes["points_per_second"] == "320000"
+    assert world.spawned[4][0].attributes["sensor_tick"] == "0.1"
 
 
 def test_runner_routes_learned_occupancy_to_safety_without_payload_swap(
@@ -182,6 +256,25 @@ def test_runner_sensor_timeout_applies_emergency_brake(monkeypatch):
 
     assert metrics.emergency_stops == 1
     assert vehicle.applied[-1]["brake"] == 1.0
+
+
+def test_runner_uses_world_elapsed_time_when_frame_counter_has_offset(
+        monkeypatch):
+    _install_fake_carla(monkeypatch)
+    vehicle = _Vehicle()
+    runner = CarlaClosedLoopRunner(
+        world=object(), vehicle=vehicle, sensors=_NonZeroWorldFrameSensors(),
+        perceive=lambda *args: BEVFeature(
+            bev=np.zeros((1, 8, 4, 4), dtype=np.float32),
+            occupancy=np.zeros((1, 1, 4, 4), dtype=np.float32)),
+        policy=lambda *args: np.array([[[1.0, 0.0, 0.0, 1.0]]],
+                                      dtype=np.float32),
+        safety_filter=SafetyFilter(), controller=PurePursuitController(),
+        config=ClosedLoopConfig(), health_gate=_health_gate(), max_steps=1)
+
+    summary = runner.run().to_summary()
+
+    assert summary["sensor_health_failures"] == 0
 
 
 def test_runner_empty_lidar_is_invalid_and_applies_emergency_brake(

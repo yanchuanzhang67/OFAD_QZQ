@@ -1,0 +1,41 @@
+{
+  "closed_loop_acceptance_valid": false,
+  "end_to_end_latency_ms": {
+    "max": 43.448128999444,
+    "p50": 17.679427000985,
+    "p95": 23.520088990335
+  },
+  "fail_safe_frames": 1,
+  "health_latency_ms": {
+    "max": 8.893077989342,
+    "p50": 6.048812501831,
+    "p95": 7.106284497422
+  },
+  "maximum_brake_frames": 101,
+  "model_latency_ms": {
+    "max": 34.250647004228,
+    "p50": 10.149650501262,
+    "p95": 14.743610890582
+  },
+  "model_mode": "random-model-network-smoke",
+  "model_performance_valid": false,
+  "model_processed_frames": 199,
+  "network_boundary_finite_rate": 1.0,
+  "observed_rejection_rate": 0.005,
+  "provenance_gaps": [
+    "vehicle_blueprint",
+    "config_sha256",
+    "calibration_sha256"
+  ],
+  "rejected_frames": 1,
+  "rejection_reasons": {
+    "imu_accel_range": 1,
+    "imu_jump": 1
+  },
+  "safety_mode_counts": {
+    "emergency_stop": 1,
+    "normal": 199
+  },
+  "total_frames": 200,
+  "valid_frames": 199
+}

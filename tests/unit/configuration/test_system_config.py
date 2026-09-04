@@ -16,6 +16,9 @@ _ROOT_CONFIG = Path(__file__).parents[3] / "configs" / "system.yaml"
 def test_system_yaml_builds_one_compatible_runtime_stack():
     stack = load_system_stack(_ROOT_CONFIG)
 
+    assert stack.config_path == _ROOT_CONFIG.resolve()
+    assert len(stack.config_sha256) == 64
+    assert len(stack.config_canonical_sha256) == 64
     assert stack.bev.num_cameras == 3
     assert stack.bev.image_size == (192, 192)
     assert stack.bev.bev_channels == stack.policy.bev_channels == 32
@@ -27,6 +30,28 @@ def test_system_yaml_builds_one_compatible_runtime_stack():
     assert stack.sensor_health.expected_calibration_version == "carla-default-v1"
     assert stack.sensor_health.min_lidar_points == 16
     assert stack.sensor_health.max_sensor_age_seconds == 0.2
+    assert stack.carla_baseline.version == "0.9.16"
+    assert stack.carla_baseline.map_name == "Town10HD_Opt"
+    assert stack.carla_baseline.vehicle_blueprint == "vehicle.lincoln.mkz_2020"
+    assert stack.carla_baseline.random_seed == 42
+    assert stack.carla_baseline.repetitions == 3
+    assert [camera.name for camera in stack.carla_baseline.cameras] == [
+        "front", "rear", "top"]
+    assert [camera.fov_degrees for camera in stack.carla_baseline.cameras] == [
+        90.0, 90.0, 100.0]
+    assert stack.carla_baseline.cameras[2].transform.rotation_degrees == (
+        0.0, -15.0, 0.0)
+    assert stack.carla_baseline.lidar.channels == 32
+    assert stack.carla_baseline.lidar.range_meters == 50.0
+    assert stack.carla_baseline.lidar.points_per_second == 320000
+    assert stack.carla_baseline.lidar.rotation_frequency_hz == 10.0
+    assert stack.carla_baseline.lidar.upper_fov_degrees == 15.0
+    assert stack.carla_baseline.lidar.lower_fov_degrees == -25.0
+    assert stack.carla_baseline.lidar.canonical_points == stack.bev.num_points
+    assert stack.carla_baseline.imu.history_steps == stack.bev.imu_steps
+    assert stack.carla_baseline.imu.channels == stack.bev.imu_in_channels
+    assert stack.bev.camera_intrinsics is not None
+    assert stack.bev.camera_extrinsics is not None
     assert stack.affordance_enabled is False
     assert stack.affordance.in_channels == stack.bev.bev_channels
     assert stack.domain_randomization.tire_friction == (0.4, 1.4)
@@ -131,4 +156,83 @@ def test_system_config_rejects_invalid_sensor_health_threshold(tmp_path):
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
     with pytest.raises(ValueError, match="max_black_ratio"):
+        load_system_stack(path)
+
+
+def test_system_config_rejects_unknown_and_missing_carla_baseline_keys(
+        tmp_path):
+    raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+    raw["carla_baseline"]["vehicle_blueprint_typo"] = "vehicle.test"
+    unknown_path = tmp_path / "unknown-carla-key.yaml"
+    unknown_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(
+            ValueError,
+            match="unknown carla_baseline keys.*vehicle_blueprint_typo"):
+        load_system_stack(unknown_path)
+
+    raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+    raw["carla_baseline"].pop("map_name")
+    missing_path = tmp_path / "missing-carla-key.yaml"
+    missing_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError,
+                       match="missing carla_baseline keys.*map_name"):
+        load_system_stack(missing_path)
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("version", ""),
+    ("map_name", ""),
+    ("vehicle_blueprint", ""),
+    ("random_seed", -1),
+    ("repetitions", 2),
+])
+def test_system_config_rejects_invalid_carla_baseline(field, value, tmp_path):
+    raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+    raw["carla_baseline"][field] = value
+    path = tmp_path / f"invalid-carla-{field}.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=field):
+        load_system_stack(path)
+
+
+def test_system_config_rejects_sensor_tick_and_cross_module_drift(tmp_path):
+    raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+    raw["carla_baseline"]["cameras"][0]["sensor_tick_seconds"] = 0.05
+    path = tmp_path / "camera-tick-drift.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="camera.*sensor_tick_seconds.*control.dt"):
+        load_system_stack(path)
+
+    raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+    raw["carla_baseline"]["lidar"]["canonical_points"] = 128
+    path = tmp_path / "lidar-points-drift.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="canonical_points.*sensors.num_points"):
+        load_system_stack(path)
+
+    raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+    raw["carla_baseline"]["imu"]["history_steps"] = 9
+    path = tmp_path / "imu-history-drift.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="history_steps.*sensors.imu_steps"):
+        load_system_stack(path)
+
+
+def test_system_config_rejects_duplicate_or_reordered_cameras(tmp_path):
+    raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+    raw["carla_baseline"]["cameras"][1]["name"] = "front"
+    path = tmp_path / "duplicate-camera.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"camera order.*front.*rear.*top"):
+        load_system_stack(path)
+
+
+def test_system_config_rejects_legacy_scalar_sensor_schema(tmp_path):
+    raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+    raw["carla_baseline"].pop("cameras")
+    raw["carla_baseline"]["camera_fov_degrees"] = 90.0
+    path = tmp_path / "legacy-carla-schema.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="legacy.*camera_fov_degrees.*cameras"):
         load_system_stack(path)

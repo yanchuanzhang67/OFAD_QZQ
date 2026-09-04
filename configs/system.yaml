@@ -44,6 +44,51 @@ runtime:
   # lidar is the validated baseline; learned/fused require a trained
   # perception checkpoint and occupancy quality evidence.
   occupancy_source: lidar
+carla_baseline:
+  version: 0.9.16
+  map_name: Town10HD_Opt
+  vehicle_blueprint: vehicle.lincoln.mkz_2020
+  random_seed: 42
+  repetitions: 3
+  cameras:
+    - name: front
+      blueprint: sensor.camera.rgb
+      location_m: [1.5, 0.0, 1.6]
+      rotation_degrees: [0.0, 0.0, 0.0]
+      fov_degrees: 90.0
+      sensor_tick_seconds: 0.1
+    - name: rear
+      blueprint: sensor.camera.rgb
+      location_m: [-1.5, 0.0, 1.6]
+      rotation_degrees: [0.0, 0.0, 180.0]
+      fov_degrees: 90.0
+      sensor_tick_seconds: 0.1
+    - name: top
+      blueprint: sensor.camera.rgb
+      location_m: [0.0, 0.0, 1.9]
+      rotation_degrees: [0.0, -15.0, 0.0]
+      fov_degrees: 100.0
+      sensor_tick_seconds: 0.1
+  lidar:
+    blueprint: sensor.lidar.ray_cast
+    location_m: [0.0, 0.0, 1.9]
+    rotation_degrees: [0.0, 0.0, 0.0]
+    channels: 32
+    range_meters: 50.0
+    points_per_second: 320000
+    rotation_frequency_hz: 10.0
+    upper_fov_degrees: 15.0
+    lower_fov_degrees: -25.0
+    sensor_tick_seconds: 0.1
+    canonical_points: 256
+    canonical_y_flip: true
+  imu:
+    blueprint: sensor.other.imu
+    location_m: [0.0, 0.0, 0.5]
+    rotation_degrees: [0.0, 0.0, 0.0]
+    sensor_tick_seconds: 0.1
+    history_steps: 10
+    channels: 6
 domain_randomization:
   tire_friction: [0.4, 1.4]
   vehicle_mass: [1500.0, 1900.0]

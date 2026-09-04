@@ -1,0 +1,32 @@
+{
+  "calibration_sha256": "c3a39a62e000a21d093749688671c1a1c952f584ff8532e46bc7da5600d485ae",
+  "calibration_version": "carla-default-v1",
+  "carla_client_version": "0.9.16",
+  "carla_server_version": "0.9.16",
+  "checkpoint_hashes": {},
+  "closed_loop_acceptance_valid": false,
+  "config_canonical_sha256": "9786122b446adc2ef5580bea772f190b5e7195cd3106b43c2f83575af6f001d9",
+  "config_path": "/home/qqq/New_ORAD/configs/system.yaml",
+  "config_sha256": "3c61c5e9da1773200c58346b7770f88d58a73f378d10ec7b47d2c7c1fa3a761c",
+  "created_at_utc": "2026-09-03T03:55:05.987415+00:00",
+  "episode_path": "/home/qqq/New_ORAD/datasets/carla_initial/episodes/episode_20260902T110145Z",
+  "episode_schema": "new-orad-carla-v1",
+  "episode_sha256": "26c84f67d7f5819f6da9c2b3191809494ca1e08312bbc822c40efd7bc7d6de01",
+  "git": {
+    "commit": "99fc0ea3991cc5e8fc3367529a939b7dee7e54f3",
+    "dirty": true
+  },
+  "map": "Carla/Maps/Town10HD_Opt",
+  "max_frames": 2,
+  "model_mode": "random-model-network-smoke",
+  "model_performance_valid": false,
+  "provenance_gaps": [
+    "vehicle_blueprint",
+    "config_sha256",
+    "calibration_sha256"
+  ],
+  "random_seed": 42,
+  "recorded_calibration_sha256": null,
+  "recorded_config_sha256": null,
+  "recorded_vehicle_blueprint": null
+}

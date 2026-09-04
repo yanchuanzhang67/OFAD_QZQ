@@ -27,6 +27,7 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 
 from safety.supervisor import SafetyMode, SafetySupervisor, SafetySupervisorConfig
+from sim.carla_baseline import CarlaBaselineConfig, carla_sensor_attributes
 from utils.schema import Observation
 from utils.sensor_health import (
     SensorHealthGate,
@@ -496,7 +497,9 @@ class CarlaSensorStack:
     def __init__(self, world, vehicle, config: ClosedLoopConfig,
                  num_cameras: int = 3, image_size: Tuple[int, int] = (192, 192),
                  lidar_channels: int = 32, lidar_range: float = 50.0,
-                 calibration_version: str = "carla-default-v1"):
+                 calibration_version: str = "carla-default-v1",
+                 sensor_attributes: Optional[dict] = None,
+                 baseline: Optional[CarlaBaselineConfig] = None):
         if not _HAS_CARLA:
             raise RuntimeError("carla PythonAPI not installed; run inside a "
                                "CARLA environment (`pip install carla`).")
@@ -510,35 +513,83 @@ class CarlaSensorStack:
         self._collision_count = 0
         self._max_impulse = 0.0
         bp = world.get_blueprint_library()
-        cam_tfs = [
-            carla.Transform(carla.Location(x=1.5, z=1.6)),
-            carla.Transform(carla.Location(x=-1.5, z=1.6),
-                            carla.Rotation(yaw=180)),
-            carla.Transform(carla.Location(x=0.0, z=1.9)),
-        ][:num_cameras]
+        sensor_attributes = sensor_attributes or (
+            carla_sensor_attributes(baseline, image_size)
+            if baseline is not None else {
+                "camera": {
+                    "image_size_x": str(image_size[0]),
+                    "image_size_y": str(image_size[1]),
+                    "fov": "90",
+                },
+                "lidar": {
+                    "channels": str(lidar_channels),
+                    "range": str(lidar_range),
+                    "points_per_second": str(lidar_channels * 1000),
+                    "rotation_frequency": "20",
+                    "upper_fov": "15",
+                    "lower_fov": "-25",
+                },
+            })
+
+        def transform_from_config(sensor_transform):
+            location = sensor_transform.location_m
+            rotation = sensor_transform.rotation_degrees
+            return carla.Transform(
+                carla.Location(x=location[0], y=location[1], z=location[2]),
+                carla.Rotation(
+                    roll=rotation[0], pitch=rotation[1], yaw=rotation[2]))
+
+        if baseline is not None:
+            if len(baseline.cameras) != num_cameras:
+                raise ValueError("baseline camera count differs from num_cameras")
+            camera_specs = [
+                (camera.name, camera.blueprint,
+                 transform_from_config(camera.transform))
+                for camera in baseline.cameras
+            ]
+            lidar_blueprint = baseline.lidar.blueprint
+            lidar_transform = transform_from_config(baseline.lidar.transform)
+            imu_blueprint = baseline.imu.blueprint
+            imu_transform = transform_from_config(baseline.imu.transform)
+        else:
+            cam_tfs = [
+                carla.Transform(carla.Location(x=1.5, z=1.6)),
+                carla.Transform(carla.Location(x=-1.5, z=1.6),
+                                carla.Rotation(yaw=180)),
+                carla.Transform(carla.Location(x=0.0, z=1.9)),
+            ][:num_cameras]
+            camera_specs = [
+                (f"camera_{index}", "sensor.camera.rgb", transform)
+                for index, transform in enumerate(cam_tfs)
+            ]
+            lidar_blueprint = "sensor.lidar.ray_cast"
+            lidar_transform = carla.Transform(carla.Location(x=0.0, z=1.9))
+            imu_blueprint = "sensor.other.imu"
+            imu_transform = carla.Transform(carla.Location(x=0.0, z=0.5))
         self._cams = []
-        for i, tf in enumerate(cam_tfs):
-            bpc = bp.find("sensor.camera.rgb")
-            bpc.set("image_size_x", str(image_size[0]))
-            bpc.set("image_size_y", str(image_size[1]))
-            bpc.set("fov", "90")
+        for i, (camera_name, blueprint_name, tf) in enumerate(camera_specs):
+            bpc = bp.find(blueprint_name)
+            camera_attributes = (
+                sensor_attributes["cameras"][camera_name]
+                if "cameras" in sensor_attributes
+                else sensor_attributes["camera"])
+            for name, value in camera_attributes.items():
+                bpc.set(name, value)
             cam = world.spawn_actor(bpc, tf, attach_to=vehicle)
             cam.listen(self._cam_q[i].append)
             self._cams.append(cam)
-        bpl = bp.find("sensor.lidar.ray_cast")
-        bpl.set("channels", str(lidar_channels))
-        bpl.set("range", str(lidar_range))
-        bpl.set("points_per_second", str(lidar_channels * 1000))
-        bpl.set("rotation_frequency", "20")
-        bpl.set("upper_fov", "15")
-        bpl.set("lower_fov", "-25")
+        bpl = bp.find(lidar_blueprint)
+        for name, value in sensor_attributes["lidar"].items():
+            bpl.set(name, value)
         self._lidar = world.spawn_actor(
-            bpl, carla.Transform(carla.Location(x=0.0, z=1.9)),
+            bpl, lidar_transform,
             attach_to=vehicle)
         self._lidar.listen(self._on_lidar)
-        bpi = bp.find("sensor.other.imu")
+        bpi = bp.find(imu_blueprint)
+        for name, value in sensor_attributes.get("imu", {}).items():
+            bpi.set(name, value)
         self._imu = world.spawn_actor(
-            bpi, carla.Transform(carla.Location(x=0.0, z=0.5)),
+            bpi, imu_transform,
             attach_to=vehicle)
         self._imu.listen(self._on_imu)
         bpc = bp.find("sensor.other.collision")
@@ -554,6 +605,7 @@ class CarlaSensorStack:
         self.last_lidar_timestamp = float("nan")
         self.last_imu_timestamps: Tuple[float, ...] = ()
         self.last_sensor_timestamps: dict = {}
+        self.last_reference_timestamp = float("nan")
 
     def _on_lidar(self, event):
         data = np.frombuffer(event.raw_data,
@@ -615,6 +667,12 @@ class CarlaSensorStack:
         }
         if imu_timestamps:
             self.last_sensor_timestamps["imu_latest"] = imu_timestamps[-1]
+        snapshot = self._world.get_snapshot()
+        if int(snapshot.frame) != int(frame):
+            raise RuntimeError(
+                f"CARLA snapshot frame {snapshot.frame} != tick frame {frame}")
+        self.last_reference_timestamp = float(
+            snapshot.timestamp.elapsed_seconds)
         return images, points, imu
 
     def collision_stats(self) -> Tuple[int, float]:
@@ -703,12 +761,14 @@ class CarlaClosedLoopRunner:
                 break
             images, points, imu = packet
             state = self._state_from_vehicle(prev)
+            reference_timestamp = float(getattr(
+                self._sensors, "last_reference_timestamp",
+                self._sensors.last_frame * self._config.dt))
             health_started = time.monotonic()
             health_report = self._health_gate.evaluate(
                 images=images, point_cloud=points, imu_history=imu,
                 frame_id=self._sensors.last_frame,
-                reference_timestamp=(
-                    self._sensors.last_frame * self._config.dt),
+                reference_timestamp=reference_timestamp,
                 camera_frames=self._sensors.last_camera_frames,
                 lidar_frame=self._sensors.last_lidar_frame,
                 imu_frames=self._sensors.last_imu_frames,
@@ -724,12 +784,11 @@ class CarlaClosedLoopRunner:
                 health_report, time.monotonic() - health_started)
             if not health_report.valid:
                 self._apply_emergency(
-                    state, metrics,
-                    self._sensors.last_frame * self._config.dt)
+                    state, metrics, reference_timestamp)
                 break
             try:
                 observation = Observation(
-                    timestamp=self._sensors.last_frame * self._config.dt,
+                    timestamp=reference_timestamp,
                     simulator_frame=self._sensors.last_frame,
                     images=images, point_cloud=points, imu_history=imu,
                     ego_state=state,
@@ -760,8 +819,7 @@ class CarlaClosedLoopRunner:
                     self._config.occupancy_source)
             except Exception:
                 self._apply_emergency(
-                    state, metrics,
-                    self._sensors.last_frame * self._config.dt)
+                    state, metrics, reference_timestamp)
                 break
             decision = self._supervisor.evaluate(
                 traj, sensor_skew=observation.max_sensor_skew_seconds,

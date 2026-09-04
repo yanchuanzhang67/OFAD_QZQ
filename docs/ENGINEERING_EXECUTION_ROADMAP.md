@@ -20,17 +20,28 @@
 - Stage 1A 整改后的当前证据为全量 `238 collected / 232 passed / 6 skipped`，
   unit branch coverage `87.79%`，健康关键模块 `98.04%`。1000 个确定性坏帧
   错误接受为 0、最大制动率 100%、p95 `0.773 ms`。
+- 2026-09-01 Task 2 软件变更后的当前回归为全量 `267 collected / 259 passed /
+  8 skipped`，unit branch coverage `88.34%`；新增 CARLA Task 1/2 环境用例仍为
+  skip，不改变 Stage 1B 未关闭结论。
+- 2026-09-03 CARLA Canonical 已统一为 0.9.16，collector/CarlaSensorStack 已统一
+  消费具名传感器配置；recorded 200 帧网络 smoke artifact 已完成。本轮全量回归为
+  `292 passed / 8 skipped / 16 warnings`；unit 为 `275 passed / 2 skipped /
+  16 warnings`，branch coverage `87.93%`。
+- 2026-09-04 复核：recorded 软件边界连通度为 `6/6`，但正式里程碑只关闭
+  `2/8`；Stage 2 数量为 `200/1000` 且缺标签/split/完整 provenance。本机无
+  `carla` Python 模块，当前关键路径仍是 clean commit→真实 Task 1→真实 Task 2→
+  完整 provenance M0 数据→BC checkpoint，而不是继续扩展随机模型功能。
 
 当前阶段判断：
 
 | 阶段 | 当前成熟度 | 主要缺口 |
 |---|---|---|
-| 1. 传感器健康门禁 | Stage 1A CPU offline verified | 软件门禁、原因指标和最大制动已关闭；真实 CARLA/ROS 2/C++/执行器为 Stage 1B |
-| 2. Recorded replay | 未完成 | 无版本化同步数据集、标签、replay runner 和正式指标报告 |
-| 3. BC 训练基线 | 代码骨架 + 单元验证 | 无 dataloader、训练入口、有效 checkpoint 和 ADE/FDE 报告 |
-| 4. 真实 CARLA 闭环 | 入口就绪 | 缺固定环境、场景清单、正式权重和真实 episode 证据 |
-| 5. ORT/TensorRT | ONNX 导出骨架 | 缺 ORT/TRT 数值回归、C++ runtime、目标硬件延迟和图外健康门禁 |
-| 6. ROS 2/SIL/HIL | 控制代码骨架 | 缺强类型消息、完整节点图、SIL/HIL 台架和车辆级安全验收 |
+| 1. 传感器健康门禁 | 离线验证 | Stage 1A 软件门禁、原因指标和最大制动已关闭；真实 CARLA/ROS 2/C++/执行器为 Stage 1B |
+| 2. Recorded replay | 离线验证 | 初始 200 帧网络 smoke 已有；缺 1000+ 数据、冻结 split、专家/hazard/occupancy 标签和正式模型指标 |
+| 3. BC 训练基线 | 单元验证 | 无 dataloader、训练入口、有效 checkpoint 和 ADE/FDE 报告 |
+| 4. 真实 CARLA 闭环 | 代码骨架 | 缺固定环境、场景清单、正式权重和真实 episode 证据 |
+| 5. ORT/TensorRT | 代码骨架 | 缺 ORT/TRT 数值回归、C++ runtime、目标硬件延迟和图外健康门禁 |
+| 6. ROS 2/SIL/HIL | 代码骨架 | 缺强类型消息、完整节点图、SIL/HIL 台架和车辆级安全验收 |
 
 ## 2. 全阶段共同规则
 
@@ -100,6 +111,21 @@ Stage 1A CPU 软件 Gate 已关闭：统一 report/reason、严格 YAML、Camera
 落地。Stage 1B 环境 Gate 仍待真实 CARLA、ROS 2/C++、执行器和目标 ECU 验收。
 详细证据见 `SENSOR_HEALTH_STAGE1A_2026-08-31.md`。
 
+Stage 1B Task 1 的固定实验基线代码已落地：2026-09-03 Canonical 为 CARLA
+`0.9.16`、`Town10HD_Opt`、Lincoln MKZ 2020、seed `42`、0.1 s control period，
+以及 front/rear/top Camera、LiDAR、IMU 的具名位姿与采样属性；collector、baseline
+工具和 `CarlaSensorStack` 均由 canonical YAML 派生。三次运行会输出不可覆盖的
+manifest/trace/summary。
+CPU 配置与证据契约已单元验证，真实 CARLA 三次一致性尚未执行，因此 Task 1 和
+Stage 1B 环境 Gate 均保持未关闭。过程见
+`CARLA_STAGE1B_TASK1_BASELINE_2026-08-31.md`。
+
+2026-09-01 Stage 1B Task 2 的无模型 Sensor→HealthGate 入口已落地：20 ticks
+warm-up 后采集 1000+ normal ticks，输出逐帧 trace、false rejection、age/skew
+分布、连续性和 latency。world snapshot timestamp 修正与 1000-tick CPU metrics
+contract 已单元验证；真实 CARLA 尚未运行，因此当前阈值的真实误杀率未知，Task 2
+保持环境待验收。过程见 `CARLA_STAGE1B_TASK2_SENSOR_HEALTH_2026-09-01.md`。
+
 ### 目标
 
 在任何模型计算前判断 Camera/LiDAR/IMU 数据是否可用于当前控制周期，并确保
@@ -164,6 +190,20 @@ Stage 1A 实测：确定性坏帧检测率 `100%`、错误接受 `0/1000`、最�
 ---
 
 ## 4. Stage 2 — Recorded replay 数据与指标
+
+### 2026-09-03 初始 smoke 状态
+
+只读 `CarlaRecordedEpisode`、HealthGate-first Observation 构造、calibration-aware
+BEVFusion/HybridPolicy、安全/控制 replay 和事务化 artifact 已落地。完整 200 帧
+随机模型 smoke 位于
+`artifacts/carla_replay/replay_20260903T035626Z_9ca5f754`：199 帧进入模型、1 帧
+启动期 IMU 拒绝，network-boundary finite rate `1.0`，health/model/end-to-end p95
+分别约 `7.11/14.74/23.52 ms`，最大制动 101 帧。该结果只达到 **离线验证**，且
+`model_performance_valid=false`、`closed_loop_acceptance_valid=false`。
+
+历史 episode 未记录 vehicle/config/calibration hash，现有报告明确保留三个
+provenance gaps；它不能关闭下面的 M0 数据 Gate。后续新 episode 必须记录完整
+provenance，禁止反向修改历史文件。
 
 ### 目标
 

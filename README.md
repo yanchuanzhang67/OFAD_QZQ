@@ -2,7 +2,9 @@
 
 New_ORAD（Off-Road Autonomous Driving）是面向非结构化越野环境的模块化端到端自动驾驶研究项目，目标涵盖多模态 BEV 感知、隐空间世界模型、模仿学习与强化学习策略、运动学安全过滤、ROS 2 控制及 ONNX/TensorRT 部署。
 
-> 当前状态：核心算法原型与单元测试阶段。项目尚未完成训练数据闭环、CARLA/Gazebo 系统验收和 TensorRT 端侧实现，不应视为可直接用于真实车辆的完整系统。
+> 当前状态（2026-09-04）：recorded CARLA 数据已打通 HealthGate→BEV→Policy→
+> Safety→Control 离线软件链路，但使用随机初始化模型，尚未完成训练数据闭环、
+> CARLA/Gazebo 系统验收和 TensorRT/车辆实现，不应视为可直接用于真实车辆的系统。
 
 ## 系统架构
 
@@ -51,7 +53,8 @@ New_ORAD/
 │   ├── world_model/    # 目标世界模型包；当前主要实现仍位于 policy
 │   ├── policy/         # RSSM、BC/RL、actor/critic、越野 reward
 │   ├── safety/         # 自行车模型、安全过滤与失效监督状态机
-│   ├── sim/            # CARLA 传感器和闭环助手
+│   ├── sim/            # CARLA baseline、传感器、健康评估和闭环助手
+│   ├── replay/         # 只读 CARLA dataset、health-first pipeline 与 artifact
 │   ├── deployment/     # PyTorch → ONNX
 │   ├── orad_ros2/      # Pure Pursuit 与 ROS 2 控制节点
 │   └── cpp/            # TensorRT C++ API 框架
@@ -62,6 +65,8 @@ New_ORAD/
 ├── configs/
 │   ├── AGENTS.md       # 唯一配置源与严格校验规则
 │   └── system.yaml     # canonical runtime configuration
+├── datasets/           # 不可变 recorded episode（不作为运行配置源）
+├── artifacts/          # 不可覆盖的 replay/实验证据
 ├── launch/             # 计划中的 ROS 2 launch，当前为空
 ├── docs/               # Phase 文档、部署指南与 SDD 审计
 │   ├── AGENTS.md       # 文档证据、状态和日志更新规则
@@ -103,13 +108,14 @@ AGENTS.md
 | 模块 | 已有能力 | 主要缺口 |
 |---|---|---|
 | `utils` | 公共类型、`Observation`、统一 `SensorHealthGate`/原因枚举、frame 变换、点云 BEV 投影 | schema version 与跨进程消息契约 |
-| `configuration` | 从唯一 YAML 派生 perception/policy/safety/control/sim/health 配置并校验 | 配置 hash 与 checkpoint lineage |
-| `perception` | 独立 Camera/LiDAR/IMU encoder、严格双模态健康 mask、BEV Conv fuser、Occupancy head | 真实标定、监督数据与精度指标 |
+| `configuration` | 从唯一 YAML 派生 perception/policy/safety/control/sim/health 配置，生成 byte/canonical hash 并严格校验 | 正式实验仍需 clean commit/checkpoint lineage |
+| `perception` | 独立 Camera/LiDAR/IMU encoder、严格双模态健康 mask、标定感知 BEV Conv fuser、Occupancy head | 监督数据、标定误差验收与精度指标 |
 | `affordance` | Traversability/Roughness 双头、masked loss、IMU 弱标签助手 | 数据标签、F1/IoU、离线泛化；默认未接入主链 |
 | `world_model` | SDD 已规划 | 包为空；RSSM/WorldModel 仍在 `policy` |
 | `policy` | 分量加权 BC、RSSM、world-model loss/统计、5-step imagination、actor/critic、reward | dataloader、训练脚本、有效 checkpoint、ADE/RL 指标 |
 | `safety` | 自行车重积分、运动学限制、碰撞截断、SafetySupervisor/fail-safe | CasADi NMPC、C++ 对等实现、环境验收 |
 | `sim` | CARLA 同步传感器、前模型健康门禁、Observation、显式 occupancy、FakeRunner、健康/风险/干预指标 | 真实 CARLA/Gazebo 闭环与物理故障注入 |
+| `replay` | 只读 episode 契约、HealthGate-first 网络/安全/控制回放、事务化证据 | 1000+ M0 数据、完整 provenance、标签、正式 checkpoint 指标 |
 | `deployment` | 感知/策略 ONNX 导出 | ORT/TRT 数值回归、TensorRT engine |
 | `orad_ros2` | Pure Pursuit、Ackermann 节点代码 | 完整依赖、节点集成测试与 launch |
 
@@ -124,6 +130,11 @@ AGENTS.md
 | Phase 3 | IL + RL + World Model | 部分完成，约 45% |
 | Phase 4 | Safety + ROS 2 | 部分完成，约 55% |
 | Phase 5 | 闭环、Sim-to-Real、ONNX/TensorRT | 部分完成，约 30% |
+
+上述百分比是 2026-08-28 的历史估计。2026-09-04 当前口径为：recorded 软件边界
+`6/6` 已连通，8 个正式里程碑中关闭 `2/8`（25%），Stage 2 最低样本数量为
+`200/1000`；三者分别代表接口连通、Gate 数量和样本数量，不能互相替代。详见
+[当前状态总览](./docs/SmartSteer_Status.md)。
 
 ## 安装
 
@@ -146,21 +157,21 @@ CARLA、ROS 2、Gazebo、CUDA 和 TensorRT 与系统版本高度相关，建议�
 python -m pytest -v
 ```
 
-2026-08-31 Stage 1A 传感器健康门禁整改后实测：
+2026-09-04 当前工作树实测：
 
 ```text
-238 collected
-232 passed
-6 skipped
+300 collected
+292 passed
+8 skipped
 16 warnings
 ```
 
 仅运行 unit 并启用 branch coverage 的基线：
 
 ```text
-229 passed, 2 skipped, 16 warnings
-Total branch coverage: 87.79%
-sensor_health.py branch coverage: 98.04%
+275 passed, 2 skipped, 16 warnings
+Total branch coverage: 87.93%
+sensor_health.py branch coverage: 98%
 ```
 
 当前仍需重点提升 sim/ROS 2/deployment 的环境路径覆盖。详细边界缺口见 [TDD 审计报告](./docs/TDD_AUDIT_2026-08-28.md)。
@@ -232,6 +243,50 @@ PYTHONPATH=src python -m deployment.onnx_export \
 
 ## CARLA 闭环入口
 
+Stage 1B 固定环境基线为 CARLA `0.9.16`、`Town10HD_Opt`、
+`vehicle.lincoln.mkz_2020`、seed `42`。三路 Camera、LiDAR 和 IMU 的位姿及采样
+参数全部由 `configs/system.yaml` 派生。在训练模型闭环前，可先执行三次纯传感器
+同步基线并生成 commit/config/environment/timing 证据：
+
+```bash
+python scripts/verify_carla_baseline.py \
+  --config configs/system.yaml \
+  --run-id stage1b-task1-<UTC时间> --steps 100
+```
+
+当前该入口已完成单元验证，尚未在真实 CARLA server 上生成三次一致性证据。
+详细边界见
+[Stage 1B Task 1 记录](./docs/CARLA_STAGE1B_TASK1_BASELINE_2026-08-31.md)。
+
+不加载 perception/policy 的正常传感器健康评估入口：
+
+```bash
+python scripts/evaluate_carla_sensor_health.py \
+  --config configs/system.yaml \
+  --run-id stage1b-task2-<UTC时间> \
+  --warmup-ticks 20 --ticks 1000
+```
+
+该入口统计 normal CARLA stream 的 false rejection、sensor age/skew、frame/IMU
+连续性和 HealthGate p50/p95。当前只有 CPU metrics/编排证据，真实阈值是否误杀
+必须由 CARLA 产物回答。详见
+[Stage 1B Task 2 记录](./docs/CARLA_STAGE1B_TASK2_SENSOR_HEALTH_2026-09-01.md)。
+
+真实 recorded episode 的只读网络数据流 smoke：
+
+```bash
+python scripts/replay_carla_pipeline.py \
+  --config configs/system.yaml \
+  --episode datasets/carla_initial/episodes/episode_20260902T110145Z \
+  --output-root artifacts/carla_replay \
+  --allow-legacy-provenance \
+  --allow-random-models --seed 42
+```
+
+随机模式只验证 HealthGate→Observation→BEV→Policy→Safety→Control 的 shape、finite
+与 fail-safe。默认必须提供成对 perception/policy checkpoint，checkpoint 不兼容时
+严格失败，绝不自动降级到随机网络。
+
 ```bash
 python scripts/evaluate_carla_closed_loop.py \
   --host 127.0.0.1 --port 2000 \
@@ -250,7 +305,8 @@ python scripts/evaluate_carla_closed_loop.py \
 - Stage 1A CPU 健康门禁已关闭；在真实 CARLA 环境完成冻结/频率/标定故障注入、
   时间戳 skew、timeout 与实际最大制动响应，关闭 Stage 1B。
 - 将同一 health reason/threshold/action 契约接入 ROS 2 与 C++ 图外 runtime。
-- 准备 recorded replay/hazard dataset，关闭 M0 数据门禁和危险边界验收。
+- recorded CARLA 200 帧 smoke 已打通；继续建立 1000+ 样本、冻结 split、专家标签、
+  hazard/occupancy 真值，才能关闭 M0 数据门禁和危险边界验收。
 - 为 Terrain Affordance 建立监督标签与 F1/IoU 门槛，达标前保持默认关闭。
 - 建立 BC dataloader/checkpoint/ADE 基线，再推进更长 horizon 的 world-model imagination。
 - 增加 PyTorch→ONNX Runtime→TensorRT 数值一致性与目标硬件时延验收。
@@ -260,7 +316,7 @@ python scripts/evaluate_carla_closed_loop.py \
 建议 TDD 质量门槛：
 
 ```text
-全项目 branch coverage：不得低于 79% 门槛，当前 87.79%
+全项目 branch coverage：不得低于 79% 门槛，当前 87.93%
 核心 safety branch coverage：≥95%
 新增/修改代码 coverage：≥95%
 P0 fail-safe 分支：100%
