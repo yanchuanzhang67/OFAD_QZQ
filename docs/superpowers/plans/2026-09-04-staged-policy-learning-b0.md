@@ -47,6 +47,11 @@
   `ModuleNotFoundError: training.bc_metrics`.
 - 2026-09-04 Task 4 Green: exact-value open-loop metric tests passed
   (`6 passed`) and targeted flake8 exited 0.
+- 2026-09-04 Task 5 Red: artifact tests stopped at collection with the expected
+  `ModuleNotFoundError: training.bc_artifacts`.
+- 2026-09-04 Task 5 Green: transactional run/checkpoint tests passed
+  (`6 passed`) and targeted flake8 exited 0. The non-finite perception fixture
+  was corrected to select a floating-point state tensor before injecting NaN.
 
 ---
 
@@ -758,7 +763,7 @@ git commit -m "feat: add BC open-loop metrics"
   `load_frozen_perception_checkpoint(path, perception) -> str`, and
   `resolve_checkpoint_index(path) -> Path`.
 
-- [ ] **Step 1: Write failing transactional artifact tests**
+- [x] **Step 1: Write failing transactional artifact tests**
 
 ```python
 def test_bc_run_writer_is_exclusive_and_publishes_success_last(tmp_path):
@@ -771,7 +776,7 @@ def test_bc_run_writer_is_exclusive_and_publishes_success_last(tmp_path):
         BCRunWriter.create(tmp_path, "run-001", {"seed": 41})
 ```
 
-- [ ] **Step 2: Write failing checkpoint family and lineage tests**
+- [x] **Step 2: Write failing checkpoint family and lineage tests**
 
 ```python
 def test_checkpoint_roundtrip_requires_pure_bc_family(tmp_path):
@@ -788,7 +793,7 @@ def test_checkpoint_roundtrip_requires_pure_bc_family(tmp_path):
         load_bc_checkpoint(tmp_path / "wrong.pt", _cfg())
 ```
 
-- [ ] **Step 3: Run artifact tests and record the Red result**
+- [x] **Step 3: Run artifact tests and record the Red result**
 
 Run:
 
@@ -798,7 +803,7 @@ python -m pytest -q tests/unit/training/test_bc_artifacts.py
 
 Expected: import failure because `training.bc_artifacts` does not exist.
 
-- [ ] **Step 4: Implement non-overwriting writer and strict checkpoint schema**
+- [x] **Step 4: Implement non-overwriting writer and strict checkpoint schema**
 
 Use schema `new-orad-policy-checkpoint-v1` and require these keys:
 
@@ -830,7 +835,7 @@ update these small indexes atomically while preserving every weight file.
 strict=True)`, freezes/evaluates the model and returns the file SHA-256. Never call
 `strict=False` and never construct `HybridPolicy` in this module.
 
-- [ ] **Step 5: Run artifact tests and record the Green result**
+- [x] **Step 5: Run artifact tests and record the Green result**
 
 Run:
 
@@ -840,7 +845,7 @@ python -m pytest -q tests/unit/training/test_bc_artifacts.py
 
 Expected: PASS; wrong family/config/state key and overwrite attempts fail explicitly.
 
-- [ ] **Step 6: Update plan evidence and commit Task 5**
+- [x] **Step 6: Update plan evidence and commit Task 5**
 
 ```bash
 git add src/training/__init__.py src/training/bc_artifacts.py \
