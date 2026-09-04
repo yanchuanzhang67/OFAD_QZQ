@@ -3,8 +3,9 @@
 New_ORAD（Off-Road Autonomous Driving）是面向非结构化越野环境的模块化端到端自动驾驶研究项目，目标涵盖多模态 BEV 感知、隐空间世界模型、模仿学习与强化学习策略、运动学安全过滤、ROS 2 控制及 ONNX/TensorRT 部署。
 
 > 当前状态（2026-09-04）：recorded CARLA 数据已打通 HealthGate→BEV→Policy→
-> Safety→Control 离线软件链路，但使用随机初始化模型，尚未完成训练数据闭环、
-> CARLA/Gazebo 系统验收和 TensorRT/车辆实现，不应视为可直接用于真实车辆的系统。
+> Safety→Control 离线软件链路；独立 `pure_bc_v1` 的数据、训练、评估、checkpoint
+> 与 replay 路由已达到**单元验证**。现有真实 episode 不是专家数据，尚无正式
+> perception/BC 权重或模型性能证据，CARLA/Gazebo、TensorRT 和车辆验收均未完成。
 
 ## 系统架构
 
@@ -15,13 +16,11 @@ RGB / LiDAR / IMU
 Perception: multi-modal BEV fusion / planned occupancy
         │
         ▼
-Affordance: traversability + terrain roughness (optional, disabled by default)
-        │
-        ▼
-World Model: RSSM latent dynamics
-        │
-        ▼
-Policy: behavior cloning + Dreamer-style RL
+Staged learning:
+  B0  Pure BC
+  B1  Affordance + BC
+  B2  Affordance + RSSM + BC
+  B3  BC-initialized Dreamer
         │
         ▼
 Trajectory [x, y, heading, velocity]
@@ -52,6 +51,7 @@ New_ORAD/
 │   ├── affordance/     # 可通行性与地形粗糙度辅助任务
 │   ├── world_model/    # 目标世界模型包；当前主要实现仍位于 policy
 │   ├── policy/         # RSSM、BC/RL、actor/critic、越野 reward
+│   ├── training/       # B0 专家数据、指标、训练循环与可追溯 checkpoint
 │   ├── safety/         # 自行车模型、安全过滤与失效监督状态机
 │   ├── sim/            # CARLA baseline、传感器、健康评估和闭环助手
 │   ├── replay/         # 只读 CARLA dataset、health-first pipeline 与 artifact
@@ -112,7 +112,8 @@ AGENTS.md
 | `perception` | 独立 Camera/LiDAR/IMU encoder、严格双模态健康 mask、标定感知 BEV Conv fuser、Occupancy head | 监督数据、标定误差验收与精度指标 |
 | `affordance` | Traversability/Roughness 双头、masked loss、IMU 弱标签助手 | 数据标签、F1/IoU、离线泛化；默认未接入主链 |
 | `world_model` | SDD 已规划 | 包为空；RSSM/WorldModel 仍在 `policy` |
-| `policy` | 分量加权 BC、RSSM、world-model loss/统计、5-step imagination、actor/critic、reward | dataloader、训练脚本、有效 checkpoint、ADE/RL 指标 |
+| `policy` | 独立确定性 `BCPolicy`；兼容保留 Hybrid BC/RSSM/imagination/actor/critic | B0 正式权重；B1–B3 尚未实施 |
+| `training` | 严格专家 manifest、HealthGate 预筛、masked metrics、冻结 perception、事务化 checkpoint、train/eval CLI | 1000+ 专家样本、3-seed 冻结 test 报告 |
 | `safety` | 自行车重积分、运动学限制、碰撞截断、SafetySupervisor/fail-safe | CasADi NMPC、C++ 对等实现、环境验收 |
 | `sim` | CARLA 同步传感器、前模型健康门禁、Observation、显式 occupancy、FakeRunner、健康/风险/干预指标 | 真实 CARLA/Gazebo 闭环与物理故障注入 |
 | `replay` | 只读 episode 契约、HealthGate-first 网络/安全/控制回放、事务化证据 | 1000+ M0 数据、完整 provenance、标签、正式 checkpoint 指标 |
@@ -157,7 +158,7 @@ CARLA、ROS 2、Gazebo、CUDA 和 TensorRT 与系统版本高度相关，建议�
 python -m pytest -v
 ```
 
-2026-09-04 当前工作树实测：
+2026-09-03 历史基线：
 
 ```text
 300 collected
@@ -166,7 +167,7 @@ python -m pytest -v
 16 warnings
 ```
 
-仅运行 unit 并启用 branch coverage 的基线：
+同期仅运行 unit 并启用 branch coverage 的历史基线：
 
 ```text
 275 passed, 2 skipped, 16 warnings
@@ -174,7 +175,10 @@ Total branch coverage: 87.93%
 sensor_health.py branch coverage: 98%
 ```
 
-当前仍需重点提升 sim/ROS 2/deployment 的环境路径覆盖。详细边界缺口见 [TDD 审计报告](./docs/TDD_AUDIT_2026-08-28.md)。
+2026-09-04 B0 实施后的最新完整回归为 `391 passed / 8 skipped / 16 warnings`；
+unit 为 `372 passed / 2 skipped / 16 warnings`，全仓 branch coverage `90.29%`。
+详见[当前状态总览](./docs/SmartSteer_Status.md#6-2026-09-04-验证结果)。当前仍需重点提升
+sim/ROS 2/deployment 的环境路径覆盖。
 
 分层运行：
 
@@ -199,11 +203,11 @@ CPU integration 已有三条不可 skip 的 Green contract（全链路、M0 1000
 
 ```python
 from perception.bev_fusion import BEVFusion, BEVFusionConfig
-from policy.hybrid_policy import HybridPolicy, HybridPolicyConfig
+from policy import BCPolicy, BCPolicyConfig
 from safety.kinematic_filter import SafetyFilter, SafetyFilterConfig
 
 perception = BEVFusion(BEVFusionConfig())
-policy = HybridPolicy(HybridPolicyConfig())
+policy = BCPolicy(BCPolicyConfig())
 safety = SafetyFilter(SafetyFilterConfig())
 ```
 
@@ -214,7 +218,7 @@ from configuration.system import load_system_stack
 
 stack = load_system_stack("configs/system.yaml")
 perception = BEVFusion(stack.bev)
-policy = HybridPolicy(stack.policy)
+policy = BCPolicy(stack.bc_policy)
 safety = SafetyFilter(stack.safety)
 ```
 
@@ -224,9 +228,37 @@ safety = SafetyFilter(stack.safety)
 images:     (B, N_camera, 3, H, W)
 points:     (B, N_point, 4) [x, y, z, intensity]
 imu:        (B, T, 6) [ax, ay, az, gx, gy, gz]
+ego:        (B, 8) [speed, steering, pitch, roll, vx, vy, yaw_rate, accel_z]
 BEV:        (B, C, H=y, W=x)
 trajectory: (B, N, 4) [x, y, heading, velocity]
 ```
+
+## B0 Pure BC 训练与评估
+
+B0 明确绕过 Affordance、RSSM 和 Dreamer。训练只接受 `expert_label=true` 的
+episode 级冻结 split 和严格加载的 perception checkpoint；当前
+`datasets/carla_initial` 为 `expert_labels=false`，会被训练入口拒绝。
+
+```bash
+PYTHONPATH=src python scripts/train_bc.py \
+  --config configs/system.yaml \
+  --data-manifest path/to/expert_manifest.yaml \
+  --perception-checkpoint path/to/perception.pt \
+  --run-dir artifacts/bc_train/<new-run> \
+  --seed 41
+
+PYTHONPATH=src python scripts/evaluate_bc.py \
+  --config configs/system.yaml \
+  --data-manifest path/to/expert_manifest.yaml \
+  --perception-checkpoint path/to/perception.pt \
+  --policy-checkpoint artifacts/bc_train/<run>/checkpoints/best.pt \
+  --run-dir artifacts/bc_eval/<new-run>
+```
+
+`--smoke-test` 只用于 CPU fixture/interface 验证，产物固定标记
+`model_performance_valid=false`，不能关闭 B0 离线性能 Gate。正式 B0 需 seeds
+`41/42/43`、1000+ 可接受训练与验证样本、独立 test episodes，并达到
+ADE `<0.30 m`、FDE `<0.60 m`、heading `<0.10 rad`、velocity `<0.50 m/s`。
 
 ## ONNX 导出
 
@@ -283,9 +315,9 @@ python scripts/replay_carla_pipeline.py \
   --allow-random-models --seed 42
 ```
 
-随机模式只验证 HealthGate→Observation→BEV→Policy→Safety→Control 的 shape、finite
-与 fail-safe。默认必须提供成对 perception/policy checkpoint，checkpoint 不兼容时
-严格失败，绝不自动降级到随机网络。
+随机模式仍只调用兼容保留的 HybridPolicy，验证 shape、finite 与 fail-safe。正式
+replay 必须提供严格配对的 perception checkpoint 与 `pure_bc_v1` checkpoint，并校验
+config/data/calibration/commit lineage；不兼容时严格失败，绝不降级到随机网络。
 
 ```bash
 python scripts/evaluate_carla_closed_loop.py \
@@ -308,7 +340,8 @@ python scripts/evaluate_carla_closed_loop.py \
 - recorded CARLA 200 帧 smoke 已打通；继续建立 1000+ 样本、冻结 split、专家标签、
   hazard/occupancy 真值，才能关闭 M0 数据门禁和危险边界验收。
 - 为 Terrain Affordance 建立监督标签与 F1/IoU 门槛，达标前保持默认关闭。
-- 建立 BC dataloader/checkpoint/ADE 基线，再推进更长 horizon 的 world-model imagination。
+- B0 软件边界已达到单元验证；下一步获取 1000+ 正式专家轨迹与 perception
+  checkpoint，完成 seeds `41/42/43` 的冻结 test ADE/FDE 基线，再启动 B1。
 - 增加 PyTorch→ONNX Runtime→TensorRT 数值一致性与目标硬件时延验收。
 
 完整 P0/P1/P2 清单见最新审计报告。
@@ -316,7 +349,7 @@ python scripts/evaluate_carla_closed_loop.py \
 建议 TDD 质量门槛：
 
 ```text
-全项目 branch coverage：不得低于 79% 门槛，当前 87.93%
+全项目 branch coverage：不得低于 79% 门槛，最新实测见状态总览
 核心 safety branch coverage：≥95%
 新增/修改代码 coverage：≥95%
 P0 fail-safe 分支：100%

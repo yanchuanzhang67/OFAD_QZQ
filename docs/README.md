@@ -7,7 +7,7 @@
 
 - `SmartSteer_Status.md`：2026-09-04 当前项目状态总览，按软件边界 `6/6`、正式
   里程碑 `2/8` 和 M0 样本 `200/1000` 三种口径统计进度，并汇总完整代码架构、
-  Canonical 参数、数据流、未解决问题和关键执行顺序。
+  Canonical 参数、B0 Pure BC 单元验证、数据流、未解决问题和关键执行顺序。
 - `../README.md`：项目入口、安装、运行与当前能力。
 - `../System_overview.md`：系统级 SDD 与验收目标。
 - `技术原理与代码架构.md`：算法原理、数据契约和代码映射。
@@ -42,10 +42,12 @@
 - `superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md`：固定
   `Pure BC → Affordance+BC → Affordance+RSSM+BC → BC-initialized Dreamer`
   的递进式研究架构，并把当前实施范围限定为不经过 RSSM 的 B0 Pure BC；聊天设计
-  与书面规格均已确认，尚未改变代码成熟度。
+  与书面规格均已确认，B0 软件实现当前为单元验证；正式专家数据/权重与冻结 test
+  性能 Gate 仍未关闭。
 - `superpowers/plans/2026-09-04-staged-policy-learning-b0.md`：B0 Pure BC 的九任务
   TDD 实施计划，覆盖动力学/配置契约、确定性网络、专家数据、指标、checkpoint、
-  train/eval CLI、recorded replay、全量验证和实时文档证据；当前等待选择执行方式。
+  train/eval CLI、recorded replay、全量验证和实时文档证据；已按内联方式执行，
+  Task 1–8 已完成，Task 9 记录最终验证与文档同步。
 
 ## 审计与整改日志
 

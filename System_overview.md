@@ -1,6 +1,10 @@
 ## 越野非结构化场景下基于 IL + RL 的端到端自动驾驶系统设计文档 (SDD)
 
-> 2026-08-30 实现状态：系统已加入严格 `Observation`/frame/timestamp 契约、SafetySupervisor 三态 fail-safe、1000 样本 M0 CPU 门禁、唯一 YAML 配置装配，以及显式 `lidar/learned/fused` occupancy 安全路由。本文描述目标设计；成熟度与验收以最新整改记录为准。
+> 2026-09-04 实现状态：系统已加入严格 `Observation`/frame/timestamp 契约、
+> SafetySupervisor 三态 fail-safe、唯一 YAML 配置装配和显式 occupancy 安全路由；
+> 独立 B0 `pure_bc_v1` 数据/训练/评估/checkpoint/replay 边界达到**单元验证**。
+> 正式专家数据、训练权重、CARLA 闭环和部署仍待验收；本文包含目标设计，当前证据
+> 以 `docs/SmartSteer_Status.md` 为准。
 
 ### 1. 系统概述 (System Overview)
 1.1 研发背景与目标
@@ -28,7 +32,8 @@
                  │                                                 │
                  └────────────────────────┬────────────────────────┘
                                           ▼
-                             [ 混合策略网络 (IL + RL) ]
+                  [ B0 Pure BC → B1 Affordance+BC →
+                    B2 Affordance+RSSM+BC → B3 Dreamer ]
                                           │
                                  [ 采样/预测轨迹 (Trajectory) ]
                                           │
@@ -58,6 +63,11 @@
 - 提供离线与隐空间想象（Imagination Rollouts）能力，大幅提升强化学习样本效率。
 
 3) 混合策略学习层 (Hybrid Policy Network)
+- B0 Pure BC：当前已实现独立确定性 `BCPolicy`，输入 frozen BEV `(B,32,50,50)`、
+  IMU `(B,10,6)` 与不含 world pose 的 `ego-dynamics-v1` `(B,8)`，输出 ego-frame
+  `(B,20,4)` 轨迹。该路径不经过 Affordance、RSSM 或 Dreamer，并具备严格专家
+  manifest、masked 指标、冻结 perception、事务化 checkpoint 与 train/eval CLI。
+  当前成熟度为**单元验证**；fixture smoke 不构成模型性能证据。
 - IL 阶段 (Behavior Cloning / Inverse RL)：采用离线数据预训练，将 BEV 特征与车体姿态作为输入，输出候选行驶轨迹或控制指令。
 - RL 阶段 (Model-Based RL / PPO / SAC)：在仿真环境或世界模型中，引入自定义越野 Reward 函数：$$\text{Reward} = R_{\text{progress}} - w_1 \cdot R_{\text{collision}} - w_2 \cdot R_{\text{attitude\_instability}} - w_3 \cdot R_{\text{jerk}}$$
 
@@ -119,11 +129,20 @@ HybridPolicy，1 帧因启动期 `imu_accel_range + imu_jump` 在模型前拒绝
 在线基线、Task 2 在线健康流、专家日志、hazard 数据、CUDA 和完整 ROS 2 环境，
 均不计为已验收。
 
-2026-09-04 复核未发现新的代码变化：全量仍为 `292 passed / 8 skipped /
+2026-09-04 B0 实施前复核：全量为 `292 passed / 8 skipped /
 16 warnings`，unit branch coverage 仍为 `87.93%`。当前 recorded 软件链路 6 个
 边界全部连通，但按严格配置、Stage 1A、Stage 1B Task 1/2、M0 数据、训练模型离线
 指标、真实 CARLA 模型闭环、部署/车辆定义的 8 个里程碑只关闭 `2/8`。本机
 `import carla` 仍失败，因此不提升仿真成熟度。
+
+2026-09-04 B0 Pure BC 实施后新增 `BCPolicyConfig`、`EgoDynamicsV1`、确定性
+`BCPolicy`、严格专家数据/指标/训练引擎/checkpoint、train/eval CLI 与 Pure BC
+recorded replay 路由。现有 200 帧 Traffic Manager episode 明确
+`expert_labels=false`，因此未用于训练，也未生成性能有效 checkpoint。最终软件
+回归为 `391 passed / 8 skipped / 16 warnings`；unit 为 `372 passed / 2 skipped /
+16 warnings`，全仓 branch coverage `90.29%`。环境 skip 明细见
+`docs/SmartSteer_Status.md` 第 6 节。B0 成熟度保持**单元验证**，B1–B3 和训练模型
+离线 Gate 未关闭。
 
 ## 4.仿真平台搭建与 Sim-to-Real 迁移路线
 

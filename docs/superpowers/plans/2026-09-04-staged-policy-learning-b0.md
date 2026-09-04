@@ -1272,6 +1272,7 @@ git commit -m "feat: route pure BC through recorded replay"
 - Modify: `docs/ENGINEERING_EXECUTION_ROADMAP.md`
 - Modify: `docs/SmartSteer_Status.md`
 - Modify: `docs/README.md`
+- Modify: `src/README.md`
 - Modify: `docs/superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md`
 - Modify: `docs/superpowers/plans/2026-09-04-staged-policy-learning-b0.md`
 
@@ -1281,7 +1282,7 @@ git commit -m "feat: route pure BC through recorded replay"
 - Produces: one synchronized status stating exactly what is unit verified, what remains
   code skeleton, and why B0 is or is not offline verified.
 
-- [ ] **Step 1: Update architecture and user commands from implemented code**
+- [x] **Step 1: Update architecture and user commands from implemented code**
 
 Document these exact boundaries:
 
@@ -1299,7 +1300,7 @@ Add the real `train_bc.py` and `evaluate_bc.py` help/usage commands. If no forma
 dataset exists, state B0 maturity as **unit verified** and leave the Stage 3 offline Gate
 open. Do not copy test counts from an older report.
 
-- [ ] **Step 2: Run all focused B0 tests**
+- [x] **Step 2: Run all focused B0 tests**
 
 Run:
 
@@ -1318,7 +1319,7 @@ python -m pytest -q \
 
 Expected: PASS; any skip must name a genuinely missing environment/data dependency.
 
-- [ ] **Step 3: Run unit branch coverage**
+- [x] **Step 3: Run unit branch coverage**
 
 Run:
 
@@ -1329,7 +1330,7 @@ python -m pytest tests/unit --cov=src --cov-report=term-missing --cov-branch
 Expected: repository branch coverage at least 79%; changed B0 critical code reaches 95%
 where feasible and every finite/family/schema rejection branch has focused coverage.
 
-- [ ] **Step 4: Run static checks**
+- [x] **Step 4: Run static checks**
 
 Run:
 
@@ -1339,7 +1340,7 @@ python -m flake8 src tests scripts --max-line-length=99
 
 Expected: exit code 0.
 
-- [ ] **Step 5: Run the full regression suite**
+- [x] **Step 5: Run the full regression suite**
 
 Run:
 
@@ -1350,7 +1351,7 @@ python -m pytest -ra
 Expected: all CPU tests PASS. Report CARLA/Gazebo/CUDA/ROS 2/expert-data skips separately;
 do not count them as B0 offline or simulation acceptance.
 
-- [ ] **Step 6: Check changed Markdown links and diff formatting**
+- [x] **Step 6: Check changed Markdown links and diff formatting**
 
 Run:
 
@@ -1362,17 +1363,18 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 7: Request code review and address only verified findings**
+- [x] **Step 7: Perform the user-selected inline code review and address verified findings**
 
 Review against the design spec, all global constraints, public import compatibility,
 checkpoint-key compatibility, fail-safe behavior and actual command output. Re-run the
 smallest affected test after each correction, then repeat Steps 2–6.
 
-- [ ] **Step 8: Commit synchronized documentation and final evidence**
+- [x] **Step 8: Commit synchronized documentation and final evidence**
 
 ```bash
 git add README.md System_overview.md docs/技术原理与代码架构.md \
-  docs/ENGINEERING_EXECUTION_ROADMAP.md docs/SmartSteer_Status.md docs/README.md \
+  src/README.md docs/ENGINEERING_EXECUTION_ROADMAP.md docs/SmartSteer_Status.md \
+  docs/README.md \
   docs/superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md \
   docs/superpowers/plans/2026-09-04-staged-policy-learning-b0.md
 git commit -m "docs: record pure BC baseline implementation"
@@ -1393,3 +1395,48 @@ At implementation completion, append one dated block here containing:
   checkpoint was created;
 - remaining external Gate: expert dataset, frozen split, perception checkpoint, B0
   three-seed metrics, CARLA closed loop, deployment and vehicle evidence.
+
+### 2026-09-04 B0 completion
+
+Red evidence, captured before each implementation:
+
+- Task 1 — `python -m pytest -q tests/unit/utils/test_contracts.py
+  tests/unit/configuration/test_system_config.py`: collection failed because
+  `EgoDynamicsV1`/`BCPolicyConfig`/`policy_model` were absent.
+- Task 2 — `python -m pytest -q tests/unit/policy/test_bc_policy.py`: import failed
+  because `policy.bc_policy` did not exist.
+- Task 3 — `python -m pytest -q tests/unit/replay/test_carla_dataset.py
+  tests/unit/training/test_bc_dataset.py`: expert fields and `training` package were absent.
+- Task 4 — `python -m pytest -q tests/unit/training/test_bc_metrics.py`: import failed
+  because `training.bc_metrics` did not exist.
+- Task 5 — `python -m pytest -q tests/unit/training/test_bc_artifacts.py`: import failed
+  because `training.bc_artifacts` did not exist.
+- Task 6 — `python -m pytest -q tests/unit/training/test_bc_engine.py`: import failed
+  because `training.bc_engine` did not exist; supplemental calibration lineage was absent.
+- Task 7 — `python -m pytest -q tests/integration/test_bc_cli.py`: evaluation CLI and
+  `evaluate_loader` were absent.
+- Task 8 — `python -m pytest -q tests/unit/replay/test_replay_artifacts.py
+  tests/unit/replay/test_carla_pipeline.py tests/integration/test_cpu_pipeline_contract.py`:
+  seven assertions failed because bundle family/schema/lineage and three-input BC routing
+  were not implemented.
+
+Final Green evidence:
+
+- Task 1–8 focused Green counts are retained in the dated Execution Log above; the final
+  combined focused B0 command passed `139 passed / 0 skipped`.
+- Unit command with isolated `COVERAGE_FILE` passed `372 passed / 2 skipped /
+  16 warnings`; total branch coverage was `90.29%` against the `79%` gate. Focused B0
+  policy/training aggregate coverage was `97.90%` (BCPolicy `99%`, config/metrics `100%`,
+  artifacts/dataset `98%`, engine `95%`).
+- Full `flake8` exited `0`; the full suite passed `391 passed / 8 skipped / 16 warnings`.
+- All relative links in the nine changed Markdown documents resolved; `git diff --check`
+  exited `0`.
+- The inline review checked staged-architecture separation, stable Hybrid imports,
+  strict checkpoint family/lineage, Python 3.9 annotations and replay fail-safe behavior;
+  no unresolved code defect remained after the validation-hardening commit.
+- No performance-valid run or checkpoint was created. CLI fixtures wrote only to pytest
+  temporary directories and were marked `model_performance_valid=false`; the recorded
+  CARLA episode remained rejected for training because `expert_labels=false`.
+- Remaining external Gate: formal expert dataset and frozen episode split, strict
+  perception checkpoint, seeds `41/42/43` test metrics, trained-model CARLA closed loop,
+  ORT/TensorRT, ROS 2/SIL/HIL and vehicle evidence.

@@ -7,7 +7,7 @@
 utils + configuration
         │
         ├─ perception ── affordance
-        ├─ policy / world_model
+        ├─ policy / world_model ── training
         ├─ safety
         ├─ sim
         ├─ replay
@@ -21,7 +21,8 @@ utils + configuration
 | `configuration` | 严格读取唯一系统 YAML 并装配全栈 | `load_system_stack` |
 | `perception` | 独立传感器编码、BEV fusion、occupancy | `BEVFusion` |
 | `affordance` | traversability/roughness 辅助任务 | `TerrainAffordanceHead` |
-| `policy` | BC、RSSM、world model、actor/critic | `HybridPolicy` |
+| `policy` | 独立 Pure BC；兼容保留 Hybrid/RSSM/actor/critic | `BCPolicy`, `HybridPolicy` |
+| `training` | 专家 manifest、B0 指标、冻结 perception 训练/评估与 checkpoint | `ExpertBCDataset`, `train_one_epoch`, `evaluate_loader` |
 | `world_model` | 目标独立边界；当前实现仍在 `policy` | 待迁移 |
 | `safety` | supervisor、运动学投影、碰撞过滤 | `SafetySupervisor`, `SafetyFilter` |
 | `sim` | simulator adapter、健康门禁编排、闭环 runner、DR | `CarlaClosedLoopRunner` |
@@ -47,3 +48,11 @@ fusion.py         explicit camera/LiDAR availability and BEV Conv fuser
 Canonical、frame/timestamp、路径边界和传感器文件。历史 manifest 缺失的 provenance
 必须显式 opt-in 并保留 gaps；不得从当前源码反推历史车辆或配置。recorded replay
 属于离线软件证据，不向 CARLA/车辆发送控制，也不替代仿真闭环验收。
+
+## Pure BC training boundary
+
+`training` 只面向 `pure_bc_v1`：输入必须来自通过 HealthGate 的正式专家 episode，
+BEV 只能由严格加载并冻结的 perception checkpoint 生成。训练 split 计算并冻结
+ego normalization；validation/test/runtime 只读取 checkpoint 中的统计量。训练期间
+不得解码 test split，所有 checkpoint 必须携带 config、dataset、calibration、
+perception 和 git lineage。历史 `HybridPolicy` 不经此路径加载。

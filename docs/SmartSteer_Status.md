@@ -1,8 +1,8 @@
 # SmartSteer / New_ORAD 当前项目状态
 
 > 状态日期：2026-09-04
-> 事实来源：当前工作树、`configs/system.yaml`、系统 SDD、工程路线图、Stage 1A/1B
-> 记录，以及 `datasets/carla_initial` 的真实 CARLA episode。成熟度只使用
+> 事实来源：当前代码、`configs/system.yaml`、系统 SDD、工程路线图、Stage 1A/1B、
+> B0 设计/实施记录，以及 `datasets/carla_initial` 的真实 CARLA episode。成熟度只使用
 > “代码骨架 / 单元验证 / 离线验证 / 仿真闭环验证 / 车辆验证”；CPU Mock/Fake、
 > Traffic Manager smoke、真实模型闭环和车辆验收严格区分。
 
@@ -18,9 +18,9 @@ SensorHealthGate
         ├─ invalid ─► reason metrics ─► EMERGENCY_STOP ─► maximum brake
         │
         ▼ valid
-Observation ─► BEVFusion ─► HybridPolicy ─► Safety ─► Pure Pursuit
-                    │                              │
-                    └─ Occupancy ─────────────────┘
+Observation ─► BEVFusion ─┬─► BCPolicy(pure_bc_v1) ─► Safety ─► Pure Pursuit
+                    │     └─► HybridPolicy（仅兼容/随机 smoke）
+                    └─ Occupancy ─────────────────────────────┘
                                                    │
                                                    ▼
                                          CARLA / ROS 2 / deployment
@@ -32,6 +32,13 @@ collector、在线 SensorStack 和 recorded replay 均从 `configs/system.yaml` 
 车辆、位姿与采样参数。固定基线与正常流工具仍为 **单元验证**：尚未完成 3 次真实
 CARLA 固定基线、1000+ normal HealthGate ticks 或在线故障注入，因此 Stage 1B
 仍未关闭。
+
+2026-09-04 新增独立 B0 `pure_bc_v1`：严格专家数据 loader、确定性三分支 BCPolicy、
+masked loss/开环指标、冻结 perception 训练/评估、事务化 checkpoint 和 recorded
+replay 严格路由均已达到 **单元验证**。B0 不经过 Affordance、RSSM 或 Dreamer；现有
+`HybridPolicy` 只保留兼容性和后续 B2/B3 骨架。由于当前真实 episode 明确为
+`expert_labels=false`，且仓库中没有正式 perception/BC checkpoint，本轮没有生成
+性能有效的训练产物，也没有提升“训练模型离线指标”或真实闭环 Gate。
 
 2026-09-03 的 recorded-data 网络 smoke 达到 **离线验证**。不可覆盖产物
 [replay_20260903T035626Z_9ca5f754](../artifacts/carla_replay/replay_20260903T035626Z_9ca5f754/summary.json)
@@ -57,6 +64,7 @@ Stage 1B/Stage 2 的 1000 样本 Gate。当前测试证据见第 6 节。
 | 正式里程碑 Gate | `2/8` 已关闭（25%） | 已关闭严格配置/公共契约和 Stage 1A CPU 健康门禁；其余需要真实环境、数据或模型证据 |
 | Stage 2 最低样本数量 | `200/1000`（20%） | 只表示数量下限进度，不代表标签、场景覆盖、split 或质量完成度 |
 | 当前最高端到端成熟度 | **离线验证** | 真实 recorded sensor 数据 + 随机初始化网络；不是训练模型性能，也不是 CARLA 闭环 |
+| B0 软件基线 | **单元验证** | 训练/评估/replay 边界已实现；尚无正式专家数据、权重或性能结果 |
 | 真实模型闭环 | `0` 个正式 episode | 尚无有效 checkpoint 和冻结场景验收 |
 | 车辆/SIL/HIL | `0` 项关闭 | ROS 2、TensorRT、台架和车辆级 Gate 均未完成 |
 
@@ -69,8 +77,8 @@ Task 1 三次真实基线、Stage 1B Task 2 真实 1000+ ticks、Stage 2 M0 数�
 
 - 数据与接口层：完整到达控制输出，shape、finite、frame/timestamp、标定和
   fail-safe 路径已有自动化证据。
-- 感知与策略层：网络结构能够前向运行，但随机权重只能证明连接；没有 occupancy、
-  ADE/FDE 或驾驶性能结论。
+- 感知与策略层：B0 已具备正式训练接口，但当前只有 CPU fixture/随机权重的结构和
+  安全证据；没有 occupancy、ADE/FDE 或驾驶性能结论。
 - 仿真层：真实 CARLA 数据采集已有 200 帧证据，但本机当前没有 `carla` Python
   模块，三次 baseline、1000+ 在线健康流和训练模型闭环均未运行。
 - 部署层：ONNX 导出达到单元验证；ORT/TensorRT、完整 ROS 2、SIL/HIL 和车辆仍是
@@ -163,7 +171,29 @@ Task 1 三次真实基线、Stage 1B Task 2 真实 1000+ ticks、Stage 2 M0 数�
 成熟度：**单元验证**。缺 occupancy 真值、IoU/false-negative、真实标定误差和
 跨地形泛化指标。
 
-### 1.6 策略、世界模型与辅助任务
+### 1.6 B0 Pure BC 软件基线
+
+- `BCPolicy` 是独立确定性网络：BEV encoder、IMU GRU、ego-dynamics MLP 融合后，
+  由 GRU decoder 输出 ego-frame `[B,20,4]` 轨迹；不调用 Affordance、RSSM、
+  posterior sampling、critic 或 Dreamer。
+- 输入契约固定为 BEV `[B,32,50,50]`、IMU `[B,10,6]`、`ego-dynamics-v1`
+  `[B,8]`；后者只含 `speed/steering/pitch/roll/vx/vy/yaw_rate/accel_z`，排除绝对
+  world `x/y/yaw`。
+- `ExpertBCDataset` 只接受正式专家 manifest 和 episode 级 split，解码前执行
+  HealthGate；现有 Traffic Manager episode 会被明确拒绝。
+- masked BC loss 与评估统一计算 ADE、FDE、周期 heading error、velocity error、
+  smoothness 及诊断分组；ego normalization 只从 train split 计算并随 checkpoint 保存。
+- `train_bc.py` / `evaluate_bc.py` 严格加载冻结 perception checkpoint；checkpoint
+  schema 为 `new-orad-policy-checkpoint-v1`，记录 policy family、config/data/
+  calibration/perception/git lineage。test split 在训练期不解码。
+- recorded replay 的正式模型路径只接受 `pure_bc_v1` 与严格匹配 lineage；异常、
+  NaN 或错误 horizon 均进入最大制动。历史随机 smoke 继续显式调用 HybridPolicy。
+
+成熟度：**单元验证**。fixture smoke 固定为 `model_performance_valid=false`；B0 只有
+在 1000+ 正式专家样本、seeds `41/42/43` 与冻结 test 指标形成后才能升级为
+**离线验证**。
+
+### 1.7 策略、世界模型与辅助任务
 
 - `HybridPolicy` 已有分量加权 BC、RSSM latent dynamics、actor/critic、world-model
   loss/statistics 和 5-step imagination 骨架。
@@ -176,7 +206,7 @@ Task 1 三次真实基线、Stage 1B Task 2 真实 1000+ ticks、Stage 2 M0 数�
 成熟度：**单元验证**。当前真实 episode 的 action 来源是 Traffic
 Manager 且 `expert_labels=false`，不能直接作为正式 BC 专家标签。
 
-### 1.7 安全、控制与部署骨架
+### 1.8 安全、控制与部署骨架
 
 - `SafetySupervisor` 提供 `NORMAL / DEGRADED / EMERGENCY_STOP`；检查 trajectory
   frame/shape/finite/速度、sensor timing 和 model latency。
@@ -199,6 +229,7 @@ ROS 2/TensorRT 为 **代码骨架**；无 SIL/HIL 或车辆验证。
 utils ───────────────► perception ──► affordance
   │                         │
   ├──────────────► policy / embedded RSSM
+  ├──────────────► training (Pure BC data/metrics/engine/checkpoint)
   ├──────────────► safety
   ├──────────────► sim
   ├──────────────► orad_ros2
@@ -221,13 +252,14 @@ New_ORAD/
 │   ├── perception/                  Camera/LiDAR/IMU encoder、BEVFusion、occupancy
 │   ├── affordance/                  traversability/roughness 可选辅助头
 │   ├── policy/                      BC、RSSM world model、actor/critic、reward
+│   ├── training/                    B0 dataset、metrics、engine、artifact/checkpoint
 │   ├── world_model/                 目标独立边界；当前实现仍主要位于 policy
 │   ├── safety/                      Supervisor、bicycle model、kinematic filter
 │   ├── sim/                         CARLA baseline、sensor stack、health/closed-loop
 │   ├── replay/                      只读 dataset、health-first pipeline、artifact
 │   ├── orad_ros2/                   Pure Pursuit、Ackermann/ROS 2 adapter
 │   └── deployment/                  PyTorch→ONNX 导出与检查
-├── scripts/                         baseline、采集、校验、健康、replay、闭环 CLI
+├── scripts/                         baseline、采集、健康、BC train/eval、replay、闭环 CLI
 ├── datasets/carla_initial/          不可变历史 CARLA episode
 ├── artifacts/carla_replay/          不可覆盖的离线回放证据
 ├── tests/                            unit、integration、sim、closed_loop 分层测试
@@ -240,14 +272,15 @@ New_ORAD/
 | `configuration` | 严格读取唯一 YAML 并装配全栈 | `load_system_stack()` |
 | `perception` | Camera/LiDAR/IMU encoder、BEV fusion、occupancy | `BEVFusion` |
 | `affordance` | traversability/roughness 辅助头 | `TerrainAffordanceHead` |
-| `policy` | BC、RSSM、actor/critic、reward | `HybridPolicy` |
+| `policy` | 独立 Pure BC；兼容 Hybrid/RSSM/actor/critic | `BCPolicy`、`HybridPolicy` |
+| `training` | 专家数据、开环指标、冻结 perception 训练/评估、checkpoint | `ExpertBCDataset`、`bc_engine`、`bc_artifacts` |
 | `world_model` | 目标独立包 | 当前为空，RSSM 仍位于 `policy` |
 | `safety` | supervisor、运动学约束、碰撞过滤 | `SafetySupervisor`、`SafetyFilter` |
 | `sim` | CARLA baseline、sensor stack、health metrics、closed-loop、DR | `CarlaSensorStack`、`CarlaClosedLoopRunner` |
 | `replay` | 只读 episode 契约、HealthGate-first 网络回放、事务化证据 | `CarlaRecordedEpisode`、`CarlaReplayPipeline` |
 | `orad_ros2` | Pure Pursuit 和 ROS 2 adapter | `PurePursuitController` |
 | `deployment` | PyTorch→ONNX | `onnx_export.py` |
-| `scripts` | 采集、数据验证、健康评估、闭环 CLI | `collect/evaluate/verify` scripts |
+| `scripts` | 采集、数据验证、BC train/eval、健康评估、闭环 CLI | `train_bc.py`、`evaluate_bc.py`、其他 `collect/evaluate/verify` scripts |
 | `datasets` | 当前真实 CARLA 初始 episode | `carla_initial/episodes` |
 
 主运行安全边界仍是：raw sensor 先经过 HealthGate，之后才允许构造 Observation 和
@@ -267,6 +300,8 @@ SensorStack 和 replay 已复用 `load_system_stack()`；数据集仍是不可�
 | fixed CARLA baseline×3 | 入口存在 | 尚无真实 `reproducible=true` artifact |
 | real CARLA normal→HealthGate×1000+ | 入口存在 | 尚无真实 summary |
 | recorded replay→Observation→BEV→policy→safety→control | 已打通 | 200-frame random-model offline smoke；非性能/闭环证据 |
+| expert manifest→frozen BEV→Pure BC train/eval | 软件入口已打通 | CPU fixture 单元验证；无正式专家数据/checkpoint |
+| recorded replay→strict Pure BC checkpoint→control | 路由已打通 | 单元验证；尚无可用正式 checkpoint artifact |
 | real CARLA→trained model→closed-loop | 未打通 | 无有效 checkpoint/formal episode |
 | PyTorch→ONNX | 基础入口存在 | 无 ORT/TRT 数值和时延对齐 |
 | ROS 2→SIL/HIL→vehicle | 局部代码存在 | 无完整节点图和台架证据 |
@@ -302,6 +337,10 @@ SensorStack 和 replay 不提供覆盖物理参数的 CLI；命令行只选择�
 | Max steering/rate | `0.5 rad / 0.5 rad/s` |
 | Max accel/decel/lateral accel | `+3 / -5 / 4 m/s²` |
 | Policy frame / occupancy source | `ego / lidar` |
+| B0 policy family / checkpoint schema | `pure_bc_v1` / `new-orad-policy-checkpoint-v1` |
+| B0 inputs | BEV `32×50×50`；IMU `10×6`；ego dynamics `8` |
+| B0 encoder / ego / latent hidden | `256 / 64 / 256` |
+| B0 trajectory / waypoint interval | `20×4` / `0.1 s` |
 | Imagination horizon | `5` |
 | BC XY/heading/speed/smooth weights | `1.0/0.2/0.2/0.05` |
 | Affordance enabled | `false` |
@@ -323,9 +362,9 @@ SensorStack 和 replay 不提供覆盖物理参数的 CLI；命令行只选择�
 | Action source | 固定基线工具 | `traffic_manager_smoke`，非专家 |
 
 当前 `system.yaml` byte SHA-256 为
-`3c61c5e9da1773200c58346b7770f88d58a73f378d10ec7b47d2c7c1fa3a761c`，
+`6faa383ade6f719511586168feffc52bfcf5a2dd5bfcd82ea887d4cf0b07c33f`，
 serialization-stable canonical SHA-256 为
-`9786122b446adc2ef5580bea772f190b5e7195cd3106b43c2f83575af6f001d9`。byte hash
+`3256a1c82d7efc91b5a297cf50d52c382e963ef4288ab1a78f4d691023901e6e`。byte hash
 用于精确文件追溯；canonical hash 用于判断不受 YAML 排版影响的配置语义一致性。
 
 Domain randomization 配置仍为 friction `0.4–1.4`、mass `1500–1900 kg`、LiDAR
@@ -343,7 +382,8 @@ CARLA online 或 recorded episode
       └─ valid:   canonicalize LiDAR → Observation(frame="ego")
                   → tensors + modality mask [[true,true]]
                   → BEVFusion → BEVFeature + occupancy
-                  → HybridPolicy → trajectory [x,y,heading,velocity]
+                  → BCPolicy(BEV, IMU, ego-dynamics-v1)
+                    → trajectory [x,y,heading,velocity]
                   → SafetySupervisor → SafetyFilter
                   → PurePursuitController → steering/speed/accel
                   → offline record；未来才允许映射为 CARLA/ROS 2 command
@@ -354,11 +394,12 @@ CARLA online 或 recorded episode
 | HealthGate | 3×HWC uint8、raw `(N,4)`、IMU `(10,6)`、时序 | `SensorHealthReport` | 无效原因 + 最大制动，模型零调用 |
 | Observation | 已通过健康门禁的数据 | ego frame、同步 timestamp、LiDAR `(256,4)` | 构造失败即 fail-safe |
 | BEVFusion | Camera `[1,3,3,192,192]`、LiDAR `[1,256,4]`、IMU `[1,10,6]` | BEV `[1,32,50,50]` + occupancy | shape/non-finite 异常进入最大制动 |
-| HybridPolicy | BEV + vehicle state | trajectory `[1,20,4]` | strict exception/non-finite fail-safe |
+| BCPolicy (`pure_bc_v1`) | BEV `[1,32,50,50]` + IMU `[1,10,6]` + ego `[1,8]` | trajectory `[1,20,4]` | strict exception/non-finite/wrong horizon fail-safe |
 | Safety | trajectory + occupancy + timing | safe/emergency trajectory | 超速、超时、碰撞风险或非法轨迹被拒绝/截断 |
 | Control | 过滤后轨迹 + ego state | steering、speed、accel | 空/异常轨迹输出 `-5 m/s²` 最大减速度 |
 
-在线与 recorded 路径共享相同配置、Observation、模型和安全契约。差别是 recorded
+正式 B0 在线与 recorded 路径共享相同配置、Observation、模型和安全契约；显式
+`--allow-random-models` 是仅供兼容 smoke 的 HybridPolicy 旁路。差别是 recorded
 replay 只写离线 command，不连接 CARLA 或车辆执行器；因此它能证明网络数据流，不能
 证明车辆实际响应。
 
@@ -372,10 +413,10 @@ replay 只写离线 command，不连接 CARLA 或车辆执行器；因此它能�
 | P0 | Stage 2 M0 数据不足 | 仅 200 帧、单 episode、单城市/天气；无 dataset root manifest、hash、split、hazard/occupancy/health 真值 |
 | P0 | 当前 action 不是专家标签 | `expert_labels=false`，不能关闭 BC 数据 Gate |
 | P0 | 历史 provenance 不完整 | episode 未记录 vehicle/config/calibration hash；只能作为显式 legacy smoke，不能反推或补写采集事实 |
-| P0 | 工作树未形成稳定基线 | HEAD 仍是 `99fc0ea` 且 dirty；本轮产物如实记录该状态，正式实验仍需 clean commit |
 | P0 | 缺有效 perception/policy checkpoint | 无法进行正式模型 CARLA 闭环 |
 | P1 | Perception/Affordance 无真实指标 | 缺 occupancy IoU/FN、traversability F1/IoU、roughness MAE；affordance 保持关闭 |
-| P1 | BC/World Model 流水线缺失 | 无正式 dataloader、train/eval CLI、checkpoint lineage、ADE/FDE 或 RL 收敛证据 |
+| P1 | B0 正式证据缺失 | 软件边界已实现，但无 1000+ 专家样本、3-seed checkpoint、冻结 test ADE/FDE；当前 TM 数据被严格拒绝 |
+| P1 | B1–B3 尚未实施 | Affordance+BC、Affordance+RSSM+BC、Dreamer 仍需分别设计、训练和消融，不能由 Hybrid 骨架替代 |
 | P1 | World Model 包边界未闭合 | `world_model` 为空，RSSM 仍嵌在 `policy`；迁移需 checkpoint compatibility |
 | P1 | 真实 CARLA/Gazebo 闭环缺失 | 无冻结 scenario matrix、正式模型 30 episodes、坡地/低摩擦/故障注入证据 |
 | P1 | ORT/TensorRT 未对齐 | 缺 ORT/TRT runtime、FP32/FP16 数值回归与目标硬件延迟 |
@@ -390,8 +431,8 @@ expert/hazard、CUDA 和完整 ROS 2 环境路径的 skip 不能计为已完成�
 
 ### P0：先形成可追溯基线并关闭真实 CARLA Gate
 
-1. 先整理当前 dirty `main`：按配置/仿真、replay、测试、文档划分原子提交，形成可供
-   实验引用的 clean commit；不要把现有原始数据或历史 artifact 混入代码提交。
+1. 正式实验必须固定 clean commit，并将 code/config/data/calibration/perception/policy
+   hash 写入新 run；不要把现有原始数据或历史 artifact 混入代码提交。
 2. 保留现有 episode 为不可变的 legacy smoke evidence，不覆盖、不补写历史 manifest；
    后续判断继续引用当前 episode/calibration hash 与明确 provenance gaps。
 3. 安装与 server 完全匹配的 CARLA 0.9.16 PythonAPI，并确认
@@ -419,11 +460,13 @@ expert/hazard、CUDA 和完整 ROS 2 环境路径的 skip 不能计为已完成�
 
 ### P1/P2：学习、闭环与部署
 
-11. 先建立最小 `BEV→BC trajectory` dataloader、train/eval CLI、3-seed checkpoint
-    lineage 和 ADE/FDE 基线，再扩大 RSSM/Dreamer/RL。
+11. B0 的 dataloader、train/eval CLI、checkpoint lineage 和 strict replay 已实现；
+    现在采集/标注正式专家轨迹、制作 episode 级 train/validation/test manifest，并
+    提供严格 perception checkpoint。随后运行 seeds `41/42/43`，以冻结 test 确认
+    ADE `<0.30 m`、FDE `<0.60 m`、heading `<0.10 rad`、velocity `<0.50 m/s`。
     2026-09-04 已确定递进式架构为 B0 `Pure BC` → B1 `Affordance+BC` → B2
-    `Affordance+RSSM+BC` → B3 `BC-initialized Dreamer`；架构设计与书面规格已确认，
-    九任务 TDD 实施计划已建立，但尚未实现新的 B0，也未改变 Stage 3 成熟度。设计与
+    `Affordance+RSSM+BC` → B3 `BC-initialized Dreamer`；B0 当前为单元验证，正式
+    离线 Gate 未关闭。只有 B0 冻结 test 达标后才启动 B1，不并行混入 RSSM/Dreamer。设计与
     计划分别见 `superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md` 和
     `superpowers/plans/2026-09-04-staged-policy-learning-b0.md`。
 12. 用正式 checkpoint 重新运行 recorded replay，先确认严格加载、finite、ADE/FDE、
@@ -435,21 +478,25 @@ expert/hazard、CUDA 和完整 ROS 2 环境路径的 skip 不能计为已完成�
 
 ## 6. 2026-09-04 验证结果
 
-- `python -m flake8 src tests scripts --max-line-length=99`：通过；
-- `git diff --check`：通过；
-- `python -m pytest tests/unit --cov=src --cov-report=term-missing --cov-branch`：
-  `275 passed / 2 skipped / 16 warnings`，branch coverage `87.93%`；
-- `python -m pytest -ra`：`292 passed / 8 skipped / 16 warnings`；
+- B0 聚焦套件（contracts、config、policy、training、replay、CLI、CPU pipeline）：
+  `139 passed / 0 skipped`；
+- `COVERAGE_FILE=/tmp/new_orad_b0_final_coverage python -m pytest tests/unit
+  --cov=src --cov-report=term-missing --cov-branch`：`372 passed / 2 skipped /
+  16 warnings`，全仓 branch coverage `90.29%`（门槛 `79%`）；
+- B0 关键模块 focused branch coverage：aggregate `97.90%`，其中 BCPolicy `99%`、
+  config/metrics `100%`、artifacts/dataset `98%`、engine `95%`；
+- `python -m flake8 src tests scripts --max-line-length=99`：exit `0`；
+- `python -m pytest -ra`：`391 passed / 8 skipped / 16 warnings`，exit `0`；
+- 修改的 9 个 Markdown 文件相对链接检查：通过；`git diff --check`：通过；
 - 8 项环境 skip：真实 CARLA 20° 坡地、Gazebo suspension、CARLA 0.9.16 Task 1、
   CARLA 0.9.16 Task 2、专家日志、hazard-boundary 数据、CUDA、完整 ROS 2 stack；
 - 数据集只读校验：200 帧，frame `1044974..1045173`，最大 timestamp skew
   `0.000000 s`；完整网络 smoke summary 的 `_SUCCESS` 与 200 条 frame record 均存在。
-- `python -c "import carla"`：`ModuleNotFoundError`；因此没有执行或宣称真实 CARLA
+- 先前环境检查 `python -c "import carla"` 为 `ModuleNotFoundError`；因此没有执行或宣称真实 CARLA
   Task 1/2 与模型闭环。
 
-覆盖率首次组合运行被执行时间上限中断并留下 0 字节 `.coverage`。确认根因后使用
-独立 `/tmp` coverage 数据文件重跑成功，并通过 `python -m coverage erase` 清理该
-临时仓库状态；这不是源代码测试失败。
+本轮没有创建性能有效的训练 run/checkpoint：CPU CLI fixture 使用临时目录且固定
+`model_performance_valid=false`；现有 CARLA episode 因 `expert_labels=false` 未进入训练。
 
 ## 7. 相关文档与证据
 

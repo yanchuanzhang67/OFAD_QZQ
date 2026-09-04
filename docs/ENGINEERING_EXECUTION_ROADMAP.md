@@ -31,6 +31,10 @@
   `2/8`；Stage 2 数量为 `200/1000` 且缺标签/split/完整 provenance。本机无
   `carla` Python 模块，当前关键路径仍是 clean commit→真实 Task 1→真实 Task 2→
   完整 provenance M0 数据→BC checkpoint，而不是继续扩展随机模型功能。
+- 2026-09-04 B0 软件实施：独立 `pure_bc_v1`、严格专家 dataset、开环指标、冻结
+  perception train/eval、可追溯 checkpoint 与 replay 路由达到**单元验证**。当前
+  episode 不是专家数据，故没有生成正式模型或关闭 Stage 3 Exit Gate。最终回归为
+  `391 passed / 8 skipped / 16 warnings`，unit branch coverage 为 `90.29%`。
 
 当前阶段判断：
 
@@ -38,7 +42,7 @@
 |---|---|---|
 | 1. 传感器健康门禁 | 离线验证 | Stage 1A 软件门禁、原因指标和最大制动已关闭；真实 CARLA/ROS 2/C++/执行器为 Stage 1B |
 | 2. Recorded replay | 离线验证 | 初始 200 帧网络 smoke 已有；缺 1000+ 数据、冻结 split、专家/hazard/occupancy 标签和正式模型指标 |
-| 3. BC 训练基线 | 单元验证 | 无 dataloader、训练入口、有效 checkpoint 和 ADE/FDE 报告 |
+| 3. BC 训练基线 | 单元验证 | 软件入口已完成；缺正式专家数据、3-seed checkpoint 和冻结 test ADE/FDE 报告 |
 | 4. 真实 CARLA 闭环 | 代码骨架 | 缺固定环境、场景清单、正式权重和真实 episode 证据 |
 | 5. ORT/TensorRT | 代码骨架 | 缺 ORT/TRT 数值回归、C++ runtime、目标硬件延迟和图外健康门禁 |
 | 6. ROS 2/SIL/HIL | 代码骨架 | 缺强类型消息、完整节点图、SIL/HIL 台架和车辆级安全验收 |
@@ -271,20 +275,20 @@ python -m pytest -ra
 ### 2026-09-04 分层策略学习决策
 
 策略研究固定为四级递进实验：B0 `Pure BC`、B1 `Affordance + BC`、B2
-`Affordance + RSSM + BC`、B3 `BC-initialized Dreamer`。当前只进入 B0 设计，
-现有 `HybridPolicy.bc_loss()` 因前向路径经过 single-step RSSM posterior，继续作为
+`Affordance + RSSM + BC`、B3 `BC-initialized Dreamer`。当前只实施 B0；现有
+`HybridPolicy.bc_loss()` 因前向路径经过 single-step RSSM posterior，继续作为
 Hybrid/Dreamer 历史骨架，不能作为 Pure BC 对照组。B0 书面规格见
 `superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md`；书面规格已确认，
 九任务 TDD 计划位于 `superpowers/plans/2026-09-04-staged-policy-learning-b0.md`，
-代码尚未开始。该决策不改变 Stage 3 当前“单元验证”成熟度，也不解除专家数据与
-正式 perception checkpoint Gate。
+代码、CLI 与测试已内联实现并达到**单元验证**。这不解除正式专家数据、严格
+perception checkpoint、3-seed 冻结 test 和 Stage 3 性能 Gate。
 
 ### 目标
 
 以最简单、可解释的 `BEV → BC trajectory` 建立稳定开环基线，然后再考虑
 Affordance、RSSM 或 Dreamer 增强。
 
-### 需要完成的工作
+### 已完成的软件工作
 
 1. 定义专家样本：
    - 输入为严格 schema 的同步 Observation/BEV 和 IMU。
@@ -299,7 +303,7 @@ Affordance、RSSM 或 Dreamer 增强。
      split 和 checkpoint lineage。
    - 保存 best/last checkpoint、optimizer state、训练曲线和 resolved config。
    - checkpoint 记录代码、配置、数据集和 perception 权重 hash。
-4. 使用现有加权 BC loss：
+4. 使用独立 `BCPolicy` 的加权 masked BC loss：
    - XY、heading、speed、二阶平滑项分别记录。
    - 首个正式 baseline 不接 Affordance/RSSM/RL，先建立可诊断参照。
 5. 增加评估：
@@ -307,32 +311,39 @@ Affordance、RSSM 或 Dreamer 增强。
    - 按地形、速度、天气、坡度和 episode 分层，不能只报告全局平均值。
    - 至少 3 个固定 seed，报告 mean/std 和失败案例。
 
-### 测试与命令
-
-需要新增并固定项目训练 CLI；推荐最终形式：
+### 正式运行命令
 
 ```bash
-python scripts/train_bc.py --config configs/system.yaml \
-  --data-manifest <expert_manifest> --run-dir runs/bc/<run_id>
-python scripts/evaluate_bc.py --checkpoint <best_checkpoint> \
-  --data-manifest <frozen_test_manifest>
-python -m pytest -q tests/unit/policy tests/integration/test_open_loop_replay.py
+PYTHONPATH=src python scripts/train_bc.py \
+  --config configs/system.yaml \
+  --data-manifest <expert_manifest> \
+  --perception-checkpoint <perception_checkpoint> \
+  --run-dir artifacts/bc_train/<new_run> --seed 41
+PYTHONPATH=src python scripts/evaluate_bc.py \
+  --config configs/system.yaml \
+  --data-manifest <expert_manifest> \
+  --perception-checkpoint <perception_checkpoint> \
+  --policy-checkpoint <best_checkpoint> \
+  --run-dir artifacts/bc_eval/<new_run>
 ```
 
-命令在训练脚本实现前只是目标接口，不能写入完成日志。
+训练期不解码 test split。`--smoke-test` 只能验证 fixture 软件接口，产物固定为
+`model_performance_valid=false`；正式运行需分别使用 seeds `41/42/43`。
 
 ### 交付物
 
-- 专家数据 schema、dataloader、训练/评估 CLI 和配置说明。
-- best/last checkpoint、checkpoint lineage、loss/metric 曲线。
-- 冻结 test split 的 ADE/FDE/heading/speed 报告和失败案例可视化。
-- `BEV → BC` baseline 报告，作为后续 Affordance/RSSM/RL 的对照组。
+- 已交付：专家 manifest/schema 的严格 loader、训练/评估 CLI、checkpoint schema/
+  lineage、loss/metric 与失败样本输出、Pure BC replay 路由。
+- 外部数据形成后交付：best/last checkpoint、3-seed 曲线、冻结 test 的
+  ADE/FDE/heading/speed 报告和失败案例。
+- Exit Gate 关闭后交付：正式 `BEV + dynamics → BC` baseline 报告，作为后续
+  Affordance/RSSM/Dreamer 的对照组。
 
 ### Exit Gate
 
 - 冻结 open-loop test split 上 ADE `< 0.3 m`（现有系统 SDD 目标）。
-- FDE、heading/speed error 和物理约束违反率有固定阈值与报告；阈值一经形成
-  baseline，不得为后续模型临时放宽。
+- FDE `<0.6 m`、heading error `<0.10 rad`、speed error `<0.50 m/s`；阈值一经
+  形成 baseline，不得为后续模型临时放宽。
 - 3 个固定 seed 无 NaN/Inf、无 schema/frame 错误，指标方差可解释。
 - checkpoint 可在干净环境严格加载并复现评估指标。
 - 未通过本 Gate 前不启动 Dreamer/RL 正式实验。

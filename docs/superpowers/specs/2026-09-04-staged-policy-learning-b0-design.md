@@ -1,9 +1,9 @@
 # 分层策略学习架构与 B0 Pure BC 设计
 
 - 日期：2026-09-04
-- 状态：书面规格已于 2026-09-04 确认；B0 实施计划已建立，代码尚未开始
+- 状态：书面规格已确认；B0 已按实施计划完成软件实现与最终验证
 - 本轮实施范围：B0 `BEV + Dynamics → Pure BC trajectory`
-- 当前实现成熟度：B0 尚未实现；既有 `HybridPolicy` 维持单元验证
+- 当前实现成熟度：B0 **单元验证**；既有 `HybridPolicy` 维持兼容与后续骨架
 - 外部依赖 Gate：正式专家标签、episode 级冻结 split 和可追溯 perception checkpoint
 
 ## 1. 背景与事实基线
@@ -26,10 +26,11 @@ posterior 采样随机 latent。该实现可以继续作为历史 Hybrid/Dreamer
 RSSM 参数和随机表征，无法回答“不使用 Affordance 和 World Model 时，BC 本身能达到
 什么水平”。
 
-当前真实 CARLA 初始 episode 只有 200 帧，动作来自 Traffic Manager，manifest 明确
+设计启动时，真实 CARLA 初始 episode 只有 200 帧，动作来自 Traffic Manager，manifest 明确
 记录 `expert_labels=false`。它只能验证数据和网络边界，禁止用于关闭 BC 训练或性能
 Gate。当前也没有可作为正式输入的 perception checkpoint、专家轨迹、episode 级冻结
-split、BC dataloader、训练/评估 CLI 或 ADE/FDE 报告。
+split、BC dataloader、训练/评估 CLI 或 ADE/FDE 报告。B0 软件实施现已补齐 loader、
+CLI 和指标能力，但数据与权重依赖仍未满足，所以仍没有正式 ADE/FDE 报告。
 
 因此，本设计先固定可比较的 B0–B3 研究序列，再只实现第一阶段 B0。B1–B3 必须分别
 形成后续设计、计划和验收记录，不能在 B0 尚未形成可复现基线时同时接入。
@@ -376,8 +377,8 @@ B3 不是“去掉 BC 的 Dreamer”，而是 `BC initialization + Dreamer fine-
 
 ## 10. 文档与实施边界
 
-本设计已经书面审阅，只进入 B0 实施计划。B0 每个任务完成时实时更新计划中的
-Red/Green 证据；代码完成后同步更新 `README.md`、`System_overview.md`、
+本设计已经书面审阅，并已按 B0 实施计划内联完成。每个任务的 Red/Green 证据记录在
+计划中；同步更新 `README.md`、`System_overview.md`、
 `docs/技术原理与代码架构.md`、`docs/ENGINEERING_EXECUTION_ROADMAP.md`、
 `docs/SmartSteer_Status.md` 和 `docs/README.md`。
 
@@ -385,3 +386,17 @@ B0 的软件实现完成不等于专家数据、模型性能或 CARLA 闭环完�
 使用“代码骨架、单元验证、离线验证、仿真闭环验证、车辆验证”五级术语。
 
 实施计划：`../plans/2026-09-04-staged-policy-learning-b0.md`。
+
+## 11. 2026-09-04 实施结果
+
+- 已交付独立 `BCPolicyConfig`、`EgoDynamicsV1` 与不含 RSSM/Affordance/Dreamer 的
+  确定性 `BCPolicy`。
+- 已交付严格专家 manifest/episode split/HealthGate loader、masked open-loop 指标、
+  冻结 perception 训练评估引擎，以及 `new-orad-policy-checkpoint-v1` 的事务化产物。
+- 已交付 `train_bc.py`、`evaluate_bc.py` 与 recorded replay 的 `pure_bc_v1` 严格路由；
+  异常、非有限或错误 horizon 进入 fail-safe。
+- 已保留 `HybridPolicy` 公共导入和历史随机 smoke 路径，没有迁移或改写其 checkpoint。
+- CPU fixture 只证明软件接口，固定标记 `model_performance_valid=false`。现有真实数据
+  `expert_labels=false`，未用于训练，仓库未生成正式 B0 checkpoint 或性能 artifact。
+- 最终测试/覆盖率命令与数字记录在实施计划和 `SmartSteer_Status.md`；B0 成熟度严格
+  保持**单元验证**，第 9.3 节离线 Gate 尚未关闭。
