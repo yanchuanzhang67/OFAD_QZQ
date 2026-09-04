@@ -15,6 +15,12 @@ from .bc_artifacts import (  # noqa: F401
     save_bc_checkpoint,
     write_checkpoint_index,
 )
+from .bc_engine import (  # noqa: F401
+    fit_ego_normalization,
+    set_deterministic_seed,
+    train_one_epoch,
+    validate_one_epoch,
+)
 
 __all__ = [
     "BCBatch",
@@ -29,4 +35,8 @@ __all__ = [
     "resolve_checkpoint_index",
     "save_bc_checkpoint",
     "write_checkpoint_index",
+    "fit_ego_normalization",
+    "set_deterministic_seed",
+    "train_one_epoch",
+    "validate_one_epoch",
 ]

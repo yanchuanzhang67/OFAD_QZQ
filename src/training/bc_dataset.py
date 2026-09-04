@@ -86,7 +86,8 @@ class ExpertBCDataset(Dataset):
             self, *, manifest_path: Path, manifest: Mapping[str, Any],
             split: str, stack: "SystemStackConfig",
             samples: tuple[_SampleReference, ...],
-            rejections: tuple[dict[str, Any], ...], split_sha256: str):
+            rejections: tuple[dict[str, Any], ...], split_sha256: str,
+            calibration_sha256: str | None):
         self.manifest_path = manifest_path
         self.manifest = dict(manifest)
         self.split = split
@@ -97,6 +98,7 @@ class ExpertBCDataset(Dataset):
         self.split_sha256 = split_sha256
         self.dataset_version = str(manifest["dataset_version"])
         self.fixture = bool(manifest["fixture"])
+        self.calibration_sha256 = calibration_sha256
 
     @classmethod
     def open(
@@ -110,9 +112,11 @@ class ExpertBCDataset(Dataset):
 
         samples = []
         rejections = []
+        calibration_hashes = set()
         selected_entries = resolved[split]
         for episode_path, recorded_hash, tags in selected_entries:
             episode = CarlaRecordedEpisode.open(episode_path, stack)
+            calibration_hashes.add(episode.calibration_sha256)
             if episode.episode_sha256 != recorded_hash:
                 _error(
                     "episode_hash_mismatch",
@@ -142,6 +146,10 @@ class ExpertBCDataset(Dataset):
                     episode_id=episode.path.name,
                     tags=tags,
                 ))
+        if len(calibration_hashes) > 1:
+            _error(
+                "calibration_hash_mismatch",
+                f"split {split} contains multiple calibration hashes")
         split_payload = json.dumps(
             manifest["splits"][split], sort_keys=True,
             separators=(",", ":")).encode("utf-8")
@@ -153,6 +161,8 @@ class ExpertBCDataset(Dataset):
             samples=tuple(samples),
             rejections=tuple(rejections),
             split_sha256=hashlib.sha256(split_payload).hexdigest(),
+            calibration_sha256=(
+                next(iter(calibration_hashes)) if calibration_hashes else None),
         )
 
     @staticmethod

@@ -52,6 +52,13 @@
 - 2026-09-04 Task 5 Green: transactional run/checkpoint tests passed
   (`6 passed`) and targeted flake8 exited 0. The non-finite perception fixture
   was corrected to select a floating-point state tensor before injecting NaN.
+- 2026-09-04 Task 6 Red: engine tests stopped at collection with the expected
+  `ModuleNotFoundError: training.bc_engine`. A supplemental calibration-lineage
+  assertion then failed with the expected missing `calibration_sha256` dataset
+  attribute.
+- 2026-09-04 Task 6 Green: engine plus expert-dataset tests passed
+  (`11 passed`); `python scripts/train_bc.py --help` listed the complete B0
+  training interface, and targeted flake8 exited 0.
 
 ---
 
@@ -873,7 +880,7 @@ git commit -m "feat: add auditable BC checkpoints"
   `train_one_epoch(perception, policy, loader, optimizer, device)`,
   `validate_one_epoch(...)`, and `scripts/train_bc.py`.
 
-- [ ] **Step 1: Write failing frozen-perception and update tests**
+- [x] **Step 1: Write failing frozen-perception and update tests**
 
 ```python
 def test_train_step_freezes_perception_and_updates_bc_policy():
@@ -890,7 +897,7 @@ def test_train_step_freezes_perception_and_updates_bc_policy():
     assert all(parameter.grad is None for parameter in perception.parameters())
 ```
 
-- [ ] **Step 2: Write failing finite-gradient and train-only normalization tests**
+- [x] **Step 2: Write failing finite-gradient and train-only normalization tests**
 
 ```python
 def test_train_epoch_fails_on_nonfinite_gradient(monkeypatch):
@@ -912,7 +919,7 @@ Compute population standard deviation (`unbiased=False`) in float64, then store 
 float32 mean/std buffers. Reject a field whose std is below `1e-6`; do not replace it
 with one because doing so would hide a degenerate training distribution.
 
-- [ ] **Step 3: Run engine tests and record the Red result**
+- [x] **Step 3: Run engine tests and record the Red result**
 
 Run:
 
@@ -922,7 +929,7 @@ python -m pytest -q tests/unit/training/test_bc_engine.py
 
 Expected: import failure because `training.bc_engine` does not exist.
 
-- [ ] **Step 4: Implement the finite deterministic training engine**
+- [x] **Step 4: Implement the finite deterministic training engine**
 
 The train step must follow this exact ownership:
 
@@ -949,7 +956,7 @@ Aggregate every loss component by valid waypoint count. Validation uses `eval` a
 Torch algorithms where supported. The run manifest records when a backend cannot offer
 bitwise determinism.
 
-- [ ] **Step 5: Implement the training CLI**
+- [x] **Step 5: Implement the training CLI**
 
 `scripts/train_bc.py` accepts exactly:
 
@@ -976,7 +983,7 @@ non-empty train/validation/test splits and a clean, strict perception checkpoint
   `last.json` each epoch and update `best.json` when validation ADE improves. Never
   overwrite an epoch weight file or an existing completed run.
 
-- [ ] **Step 6: Run engine and CLI-help tests and record Green**
+- [x] **Step 6: Run engine and CLI-help tests and record Green**
 
 Run:
 
@@ -987,7 +994,7 @@ python scripts/train_bc.py --help
 
 Expected: unit tests PASS and help lists every declared argument.
 
-- [ ] **Step 7: Update plan evidence and commit Task 6**
+- [x] **Step 7: Update plan evidence and commit Task 6**
 
 ```bash
 git add src/training/__init__.py src/training/bc_engine.py \

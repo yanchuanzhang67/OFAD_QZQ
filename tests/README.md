@@ -28,3 +28,9 @@ gap、HealthGate-first 零模型调用、严格 checkpoint 模式、最大制动
 `integration/test_recorded_carla_network_smoke.py` 使用 CPU 真实 BEVFusion/HybridPolicy
 验证 recorded frame 的 shape/finite 数据流；随机权重不验证驾驶质量。真实 200 帧
 artifact 是离线验证，不能替代 `closed_loop/` 中仍需 CARLA server 的 Gate。
+
+2026-09-04 新增 `unit/training/`：B0 Pure BC 采用严格专家 manifest、train-only
+动力学归一化、冻结且 strict-loaded 的 BEVFusion、有限 loss/gradient、不可覆盖
+checkpoint 与逐 epoch 审计日志。fixture/smoke 只能验证训练软件链路，产物必须记录
+`model_performance_valid=false`；没有 1000+ 专家样本、三 seed 和冻结 test 证据时，
+不得把 B0 提升为离线验证。

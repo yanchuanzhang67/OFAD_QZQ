@@ -82,6 +82,8 @@ def test_expert_dataset_collates_canonical_b0_batch(tmp_path):
     assert batch.tags[0]["terrain"] == "dirt"
     assert 0.0 <= batch.images.min().item() <= batch.images.max().item() <= 1.0
     assert len(dataset.manifest_sha256) == len(dataset.split_sha256) == 64
+    assert dataset.calibration_sha256 == CarlaRecordedEpisode.open(
+        episode, stack).calibration_sha256
 
 
 def test_expert_dataset_rejects_non_expert_episode(tmp_path):
