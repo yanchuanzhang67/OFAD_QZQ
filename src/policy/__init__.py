@@ -12,6 +12,7 @@ Implemented modules (Phase 3):
 Public re-exports for convenience.
 """
 from .offroad_reward import OffRoadReward, OffRoadRewardConfig  # noqa: E402,F401
+from .config import BCPolicyConfig  # noqa: E402,F401
 from .hybrid_policy import (  # noqa: E402,F401
     HybridPolicy,
     HybridPolicyConfig,
@@ -26,4 +27,5 @@ __all__ = [
     "RSSM",
     "OffRoadReward",
     "OffRoadRewardConfig",
+    "BCPolicyConfig",
 ]

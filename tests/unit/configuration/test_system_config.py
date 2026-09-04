@@ -22,6 +22,14 @@ def test_system_yaml_builds_one_compatible_runtime_stack():
     assert stack.bev.num_cameras == 3
     assert stack.bev.image_size == (192, 192)
     assert stack.bev.bev_channels == stack.policy.bev_channels == 32
+    assert stack.bc_policy.family == "pure_bc_v1"
+    assert stack.bc_policy.bev_channels == stack.bev.bev_channels == 32
+    assert stack.bc_policy.bev_h == stack.bc_policy.bev_w == 50
+    assert stack.bc_policy.imu_steps == 10
+    assert stack.bc_policy.ego_dim == 8
+    assert stack.bc_policy.horizon == 20
+    assert stack.bc_policy.traj_dim == 4
+    assert stack.bc_policy.waypoint_dt == stack.closed_loop.dt == 0.1
     assert stack.policy.imagine_horizon == 5
     assert stack.closed_loop.occupancy_source == "lidar"
     assert stack.sensor_health.num_cameras == stack.bev.num_cameras
@@ -57,7 +65,7 @@ def test_system_yaml_builds_one_compatible_runtime_stack():
     assert stack.domain_randomization.tire_friction == (0.4, 1.4)
     validate_stack_configs(
         stack.bev, stack.policy, stack.safety, stack.controller,
-        stack.closed_loop)
+        stack.closed_loop, bc_policy=stack.bc_policy)
 
 
 def test_system_config_applies_runtime_overrides_without_hidden_drift():
@@ -94,6 +102,29 @@ def test_system_config_rejects_unknown_nested_key(tmp_path):
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="geometry.*bev_chanels"):
         load_system_stack(path)
+
+
+def test_system_config_rejects_unknown_policy_model_key(tmp_path):
+    raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+    raw["policy_model"]["hidden_typo"] = 128
+    path = tmp_path / "bad-policy.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unknown policy_model keys.*hidden_typo"):
+        load_system_stack(path)
+
+
+def test_system_config_rejects_wrong_policy_family_and_ego_schema(tmp_path):
+    for field, value in (
+            ("family", "hybrid_legacy"),
+            ("ego_dynamics_schema", "ego-dynamics-v2")):
+        raw = yaml.safe_load(_ROOT_CONFIG.read_text(encoding="utf-8"))
+        raw["policy_model"][field] = value
+        path = tmp_path / f"bad-policy-{field}.yaml"
+        path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+        with pytest.raises(ValueError, match=field):
+            load_system_stack(path)
 
 
 def test_system_config_rejects_missing_file_and_non_mapping_root(tmp_path):

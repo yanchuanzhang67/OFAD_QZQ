@@ -101,6 +101,14 @@ affordance:
   traversability_weight: 1.0
   roughness_weight: 1.0
   speed_epsilon: 0.5
+policy_model:
+  family: pure_bc_v1
+  encoder_hidden: 256
+  ego_hidden: 64
+  latent_dim: 256
+  horizon: 20
+  trajectory_dim: 4
+  ego_dynamics_schema: ego-dynamics-v1
 policy_training:
   imagination_horizon: 5
   bc_xy_weight: 1.0

@@ -6,7 +6,8 @@ def _grid_n(rng, resolution):
     return max(1, int(round((float(rng[1]) - float(rng[0])) / resolution)))
 
 
-def validate_stack_configs(bev, policy, safety, controller, closed_loop) -> None:
+def validate_stack_configs(
+        bev, policy, safety, controller, closed_loop, *, bc_policy=None) -> None:
     """Fail fast when duplicated public dimensions or physical limits drift."""
     errors = []
     expected_h = _grid_n(bev.bev_y_range, bev.bev_resolution)
@@ -32,6 +33,18 @@ def validate_stack_configs(bev, policy, safety, controller, closed_loop) -> None
         (controller.max_decel, safety.max_decel, "controller.max_decel"),
         (closed_loop.dt, safety.dt, "closed_loop.dt"),
     ]
+    if bc_policy is not None:
+        checks.extend([
+            (bc_policy.bev_channels, bev.bev_channels,
+             "bc_policy.bev_channels"),
+            (bc_policy.bev_h, expected_h, "bc_policy.bev_h"),
+            (bc_policy.bev_w, expected_w, "bc_policy.bev_w"),
+            (bc_policy.imu_in_channels, bev.imu_in_channels,
+             "bc_policy.imu_in_channels"),
+            (bc_policy.imu_steps, bev.imu_steps, "bc_policy.imu_steps"),
+            (bc_policy.waypoint_dt, closed_loop.dt,
+             "bc_policy.waypoint_dt"),
+        ])
     for actual, expected, name in checks:
         if actual != expected:
             errors.append(f"{name}={actual!r}, expected {expected!r}")

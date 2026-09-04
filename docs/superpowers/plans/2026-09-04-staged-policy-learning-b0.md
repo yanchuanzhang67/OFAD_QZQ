@@ -24,6 +24,17 @@
 - B0 can reach unit verification without external expert data, but reaches offline verification only with the spec's 1000+ expert-sample, three-seed and frozen-test evidence.
 - After every task, update this plan's checkboxes and append the exact Red/Green command outcome before committing.
 
+## Execution Log
+
+- 2026-09-04 pre-change baseline: `python -m pytest -ra` →
+  `292 passed / 8 skipped / 16 warnings` in `17.60 s`. The skips are the existing
+  CARLA, Gazebo, expert-log, hazard-boundary, CUDA and full ROS 2 environment gates;
+  no baseline failure was present.
+- 2026-09-04 Task 1 Red: focused config/contract tests stopped at collection with
+  the expected `ImportError` for missing `EGO_DYNAMICS_V1_FIELDS`.
+- 2026-09-04 Task 1 Green: focused config/contract tests passed (`26 passed`);
+  targeted flake8 exited 0.
+
 ---
 
 ## File Structure
@@ -83,7 +94,7 @@
 - Consumes: `utils.types.VehicleState`, BEV dimensions from `BEVFusionConfig`, IMU dimensions from `sensors`, and `control.dt`.
 - Produces: `EGO_DYNAMICS_V1_FIELDS`, `EgoDynamicsV1.from_vehicle_state(state)`, `EgoDynamicsV1.to_array()`, `BCPolicyConfig`, and `SystemStackConfig.bc_policy`.
 
-- [ ] **Step 1: Write failing ego-dynamics contract tests**
+- [x] **Step 1: Write failing ego-dynamics contract tests**
 
 ```python
 def test_ego_dynamics_v1_excludes_world_pose_and_preserves_order():
@@ -105,7 +116,7 @@ def test_ego_dynamics_v1_rejects_nonfinite_vehicle_state():
         EgoDynamicsV1.from_vehicle_state(VehicleState(speed=float("nan")))
 ```
 
-- [ ] **Step 2: Write failing strict configuration tests**
+- [x] **Step 2: Write failing strict configuration tests**
 
 ```python
 def test_system_yaml_builds_pure_bc_config():
@@ -129,7 +140,7 @@ def test_system_config_rejects_unknown_policy_model_key(tmp_path):
         load_system_stack(path)
 ```
 
-- [ ] **Step 3: Run focused tests and record the expected Red result**
+- [x] **Step 3: Run focused tests and record the expected Red result**
 
 Run:
 
@@ -142,7 +153,7 @@ python -m pytest -q \
 Expected: collection/import failure because `EgoDynamicsV1`, `BCPolicyConfig`,
 `policy_model` and `SystemStackConfig.bc_policy` do not exist.
 
-- [ ] **Step 4: Implement the minimal shared contracts**
+- [x] **Step 4: Implement the minimal shared contracts**
 
 Add the framework-independent state conversion to `utils/types.py`:
 
@@ -214,7 +225,7 @@ Extend `_SECTION_KEYS`, derive BEV/IMU/waypoint dimensions rather than duplicati
 them, reject a family other than `pure_bc_v1`, and make
 `validate_stack_configs(..., bc_policy=None)` backward-compatible for existing callers.
 
-- [ ] **Step 5: Run focused tests and record the Green result**
+- [x] **Step 5: Run focused tests and record the Green result**
 
 Run:
 
@@ -226,7 +237,7 @@ python -m pytest -q \
 
 Expected: PASS with no CPU test skipped.
 
-- [ ] **Step 6: Run static checks for the changed Python files**
+- [x] **Step 6: Run static checks for the changed Python files**
 
 Run:
 
@@ -239,7 +250,7 @@ python -m flake8 \
 
 Expected: exit code 0.
 
-- [ ] **Step 7: Update plan evidence and commit Task 1**
+- [x] **Step 7: Update plan evidence and commit Task 1**
 
 ```bash
 git add configs/system.yaml src/utils/types.py src/utils/contracts.py \

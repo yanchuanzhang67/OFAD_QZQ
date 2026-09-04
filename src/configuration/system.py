@@ -10,6 +10,7 @@ import yaml
 from affordance.terrain import TerrainAffordanceConfig
 from orad_ros2.vehicle_control_node import PurePursuitConfig
 from perception.bev_fusion import BEVFusionConfig
+from policy.config import BCPolicyConfig
 from policy.hybrid_policy import HybridPolicyConfig
 from safety.kinematic_filter import SafetyFilterConfig
 from sim.carla_closed_loop import ClosedLoopConfig
@@ -63,6 +64,10 @@ _SECTION_KEYS = {
         "enabled", "hidden_channels", "traversability_weight",
         "roughness_weight", "speed_epsilon",
     },
+    "policy_model": {
+        "family", "encoder_hidden", "ego_hidden", "latent_dim",
+        "horizon", "trajectory_dim", "ego_dynamics_schema",
+    },
     "policy_training": {
         "imagination_horizon", "bc_xy_weight", "bc_heading_weight",
         "bc_speed_weight", "bc_smooth_weight",
@@ -92,6 +97,7 @@ class SystemStackConfig:
     config_canonical_sha256: str
     bev: BEVFusionConfig
     policy: HybridPolicyConfig
+    bc_policy: BCPolicyConfig
     safety: SafetyFilterConfig
     controller: PurePursuitConfig
     closed_loop: ClosedLoopConfig
@@ -261,6 +267,7 @@ def load_system_stack(path, *, policy_frame: Optional[str] = None,
     runtime = raw["runtime"]
     carla_baseline_raw = raw["carla_baseline"]
     training = raw["policy_training"]
+    policy_model = raw["policy_model"]
     affordance_raw = raw["affordance"]
     dr = raw["domain_randomization"]
 
@@ -299,6 +306,30 @@ def load_system_stack(path, *, policy_frame: Optional[str] = None,
         bev_channels=bev.bev_channels, bev_h=bev_h, bev_w=bev_w,
         imu_in_channels=bev.imu_in_channels, imu_steps=bev.imu_steps,
         imagine_horizon=int(training["imagination_horizon"]),
+        bc_xy_weight=float(training["bc_xy_weight"]),
+        bc_heading_weight=float(training["bc_heading_weight"]),
+        bc_speed_weight=float(training["bc_speed_weight"]),
+        bc_smooth_weight=float(training["bc_smooth_weight"]),
+    )
+    if str(policy_model["family"]) != "pure_bc_v1":
+        raise ValueError("policy_model.family must be pure_bc_v1")
+    if str(policy_model["ego_dynamics_schema"]) != "ego-dynamics-v1":
+        raise ValueError(
+            "policy_model.ego_dynamics_schema must be ego-dynamics-v1")
+    bc_policy = BCPolicyConfig(
+        family=str(policy_model["family"]),
+        bev_channels=bev.bev_channels,
+        bev_h=bev_h,
+        bev_w=bev_w,
+        imu_in_channels=bev.imu_in_channels,
+        imu_steps=bev.imu_steps,
+        ego_dim=8,
+        encoder_hidden=int(policy_model["encoder_hidden"]),
+        ego_hidden=int(policy_model["ego_hidden"]),
+        latent_dim=int(policy_model["latent_dim"]),
+        horizon=int(policy_model["horizon"]),
+        traj_dim=int(policy_model["trajectory_dim"]),
+        waypoint_dt=float(control["dt"]),
         bc_xy_weight=float(training["bc_xy_weight"]),
         bc_heading_weight=float(training["bc_heading_weight"]),
         bc_speed_weight=float(training["bc_speed_weight"]),
@@ -375,7 +406,8 @@ def load_system_stack(path, *, policy_frame: Optional[str] = None,
         config_path=config_path.resolve(),
         config_sha256=sha256_file(config_path),
         config_canonical_sha256=canonical_yaml_sha256(config_path),
-        bev=bev, policy=policy, safety=safety, controller=controller,
+        bev=bev, policy=policy, bc_policy=bc_policy,
+        safety=safety, controller=controller,
         closed_loop=closed_loop, affordance=affordance,
         affordance_enabled=bool(affordance_raw["enabled"]),
         domain_randomization=domain_randomization,
@@ -384,5 +416,5 @@ def load_system_stack(path, *, policy_frame: Optional[str] = None,
     )
     validate_stack_configs(
         stack.bev, stack.policy, stack.safety, stack.controller,
-        stack.closed_loop)
+        stack.closed_loop, bc_policy=stack.bc_policy)
     return stack

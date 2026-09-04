@@ -14,6 +14,8 @@ import numpy as np
 
 __all__ = [
     "VehicleState",
+    "EGO_DYNAMICS_V1_FIELDS",
+    "EgoDynamicsV1",
     "Waypoint",
     "Trajectory",
     "OccupancyGrid",
@@ -56,6 +58,33 @@ class VehicleState:
     def from_array(cls, arr: np.ndarray) -> "VehicleState":
         arr = np.asarray(arr, dtype=np.float32).ravel()
         return cls(**{k: float(arr[i]) for i, k in enumerate(cls._FIELDS[: len(arr)])})
+
+
+EGO_DYNAMICS_V1_FIELDS = (
+    "speed", "steering", "pitch", "roll",
+    "vx", "vy", "yaw_rate", "accel_z",
+)
+
+
+@dataclass(frozen=True)
+class EgoDynamicsV1:
+    """Versioned policy input excluding absolute world position and yaw."""
+
+    values: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.values) != 8 or not np.isfinite(self.values).all():
+            raise ValueError(
+                "ego-dynamics-v1 values must be finite with length 8")
+
+    @classmethod
+    def from_vehicle_state(cls, state: VehicleState) -> "EgoDynamicsV1":
+        return cls(tuple(
+            float(getattr(state, name))
+            for name in EGO_DYNAMICS_V1_FIELDS))
+
+    def to_array(self) -> np.ndarray:
+        return np.asarray(self.values, dtype=np.float32).copy()
 
 
 @dataclass
