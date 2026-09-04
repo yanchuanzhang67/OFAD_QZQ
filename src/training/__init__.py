@@ -16,6 +16,7 @@ from .bc_artifacts import (  # noqa: F401
     write_checkpoint_index,
 )
 from .bc_engine import (  # noqa: F401
+    evaluate_loader,
     fit_ego_normalization,
     set_deterministic_seed,
     train_one_epoch,
@@ -36,6 +37,7 @@ __all__ = [
     "save_bc_checkpoint",
     "write_checkpoint_index",
     "fit_ego_normalization",
+    "evaluate_loader",
     "set_deterministic_seed",
     "train_one_epoch",
     "validate_one_epoch",

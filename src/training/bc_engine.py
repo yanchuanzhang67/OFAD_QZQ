@@ -11,10 +11,11 @@ import torch.nn as nn
 from policy.bc_policy import BCPolicy, masked_bc_loss_components
 
 from .bc_dataset import BCBatch
-from .bc_metrics import BCMetricAccumulator
+from .bc_metrics import BCMetricAccumulator, wrapped_angle_error
 
 __all__ = [
     "fit_ego_normalization",
+    "evaluate_loader",
     "set_deterministic_seed",
     "train_one_epoch",
     "validate_one_epoch",
@@ -231,4 +232,84 @@ def validate_one_epoch(
                 episode_ids=batch.episode_ids, tags=batch.tags)
     result: dict[str, object] = totals.result()
     result.update(metrics.compute())
+    return result
+
+
+def _sample_failures(
+        prediction: torch.Tensor, target: torch.Tensor,
+        mask: torch.Tensor) -> tuple[list[str], dict[str, float]]:
+    distance = torch.linalg.vector_norm(
+        prediction[..., :2] - target[..., :2], dim=-1)
+    last_index = int(torch.nonzero(mask, as_tuple=False)[-1].item())
+    values = {
+        "ade_m": float(distance[mask].mean().item()),
+        "fde_m": float(distance[last_index].item()),
+        "heading_mae_rad": float(wrapped_angle_error(
+            prediction[..., 2], target[..., 2])[mask].mean().item()),
+        "velocity_mae_mps": float(
+            (prediction[..., 3] - target[..., 3]).abs()[mask].mean().item()),
+    }
+    limits = {
+        "ade_m": 0.30,
+        "fde_m": 0.60,
+        "heading_mae_rad": 0.10,
+        "velocity_mae_mps": 0.50,
+    }
+    return [name for name, limit in limits.items()
+            if values[name] >= limit], values
+
+
+def evaluate_loader(
+        perception: nn.Module, policy: BCPolicy,
+        loader: Iterable[BCBatch], device: torch.device,
+        *, max_speed: float) -> dict[str, object]:
+    """Evaluate one immutable split and report fixed B0 Gate diagnostics."""
+    _freeze_perception(perception, device)
+    policy.to(device)
+    policy.eval()
+    totals = _EpochTotals()
+    metrics = BCMetricAccumulator(max_speed=max_speed)
+    failed_samples = []
+    with torch.no_grad():
+        for raw_batch in loader:
+            batch = _move_batch(raw_batch, device)
+            bev = _bev_feature(perception, batch, device)
+            prediction = policy(bev, batch.imu, batch.ego)
+            losses = masked_bc_loss_components(
+                prediction, batch.expert, batch.mask, policy.config)
+            totals.update(losses, batch.size)
+            metrics.update(
+                prediction, batch.expert, batch.mask,
+                episode_ids=batch.episode_ids, tags=batch.tags)
+            for index, sample_id in enumerate(batch.sample_ids):
+                reasons, values = _sample_failures(
+                    prediction[index], batch.expert[index], batch.mask[index])
+                if reasons:
+                    failed_samples.append({
+                        "sample_id": str(sample_id),
+                        "episode_id": str(batch.episode_ids[index]),
+                        "reasons": reasons,
+                        "metrics": values,
+                    })
+
+    result: dict[str, object] = totals.result()
+    result.update(metrics.compute())
+    thresholds = {
+        "ade_m": {"operator": "<", "limit": 0.30},
+        "fde_m": {"operator": "<", "limit": 0.60},
+        "heading_mae_rad": {"operator": "<", "limit": 0.10},
+        "velocity_mae_mps": {"operator": "<", "limit": 0.50},
+        "nonfinite_trajectory_count": {"operator": "=", "limit": 0},
+    }
+    for name, condition in thresholds.items():
+        actual = result[name]
+        limit = condition["limit"]
+        condition["actual"] = actual
+        condition["passed"] = (
+            actual == limit if condition["operator"] == "="
+            else actual < limit)
+    result["thresholds"] = thresholds
+    result["thresholds_passed"] = all(
+        bool(condition["passed"]) for condition in thresholds.values())
+    result["failed_samples"] = failed_samples
     return result

@@ -59,6 +59,13 @@
 - 2026-09-04 Task 6 Green: engine plus expert-dataset tests passed
   (`11 passed`); `python scripts/train_bc.py --help` listed the complete B0
   training interface, and targeted flake8 exited 0.
+- 2026-09-04 Task 7 Red: evaluation integration tests stopped at collection
+  with the expected missing `evaluate_loader` import; the evaluation CLI did
+  not yet exist.
+- 2026-09-04 Task 7 Green: the CPU fixture train→checkpoint→frozen-test flow
+  passed (`2 passed`), including config mismatch rejection and immutable model
+  state. The complete training/evaluation focus set passed (`25 passed`), both
+  CLI help contracts rendered, and targeted flake8 exited 0.
 
 ---
 
@@ -1020,7 +1027,7 @@ git commit -m "feat: add pure BC training workflow"
 - Produces: `evaluate_loader(...) -> dict`, an evaluation `metrics.json`, failure-sample
   JSONL and `scripts/evaluate_bc.py`.
 
-- [ ] **Step 1: Write a failing evaluation integration test**
+- [x] **Step 1: Write a failing evaluation integration test**
 
 ```python
 def test_fixture_train_then_evaluate_is_explicitly_non_performance(tmp_path):
@@ -1040,7 +1047,7 @@ def test_fixture_train_then_evaluate_is_explicitly_non_performance(tmp_path):
     assert metrics["sample_count"] > 0
 ```
 
-- [ ] **Step 2: Write failing checkpoint/config mismatch and immutable-test tests**
+- [x] **Step 2: Write failing checkpoint/config mismatch and immutable-test tests**
 
 ```python
 def test_evaluate_rejects_config_hash_mismatch(tmp_path):
@@ -1057,7 +1064,7 @@ def test_evaluate_never_updates_policy_or_normalization(expert_fixture):
     assert _state_equal(policy, before)
 ```
 
-- [ ] **Step 3: Run the integration test and record the Red result**
+- [x] **Step 3: Run the integration test and record the Red result**
 
 Run:
 
@@ -1067,7 +1074,7 @@ python -m pytest -q tests/integration/test_bc_cli.py
 
 Expected: FAIL because `scripts/evaluate_bc.py` and `evaluate_loader` do not exist.
 
-- [ ] **Step 4: Implement immutable evaluation**
+- [x] **Step 4: Implement immutable evaluation**
 
 Add `evaluate_loader` using `perception.eval()`, `policy.eval()` and `torch.no_grad()`.
 Write global/per-episode/tag metrics, checkpoint/data/config hashes, threshold results
@@ -1093,7 +1100,7 @@ Exit non-zero on checkpoint/config/data/calibration mismatch, non-finite output,
 samples, incomplete metrics or write failure. Do not modify checkpoint or normalization
 state during evaluation.
 
-- [ ] **Step 5: Run the integration test and record the Green result**
+- [x] **Step 5: Run the integration test and record the Green result**
 
 Run:
 
@@ -1103,7 +1110,7 @@ python -m pytest -q tests/integration/test_bc_cli.py
 
 Expected: PASS; fixture artifacts exist but state `model_performance_valid=false`.
 
-- [ ] **Step 6: Update plan evidence and commit Task 7**
+- [x] **Step 6: Update plan evidence and commit Task 7**
 
 ```bash
 git add scripts/evaluate_bc.py src/training/bc_engine.py \
