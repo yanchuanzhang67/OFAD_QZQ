@@ -50,6 +50,9 @@ class RecordedCarlaFrame:
     sensor_skew_seconds: float
     action_source: str
     expert_label: bool
+    expert_source: str = "unknown"
+    expert_trajectory: Optional[np.ndarray] = None
+    trajectory_mask: Optional[np.ndarray] = None
 
 
 def _error(code: str, message: str):
@@ -329,6 +332,12 @@ class CarlaRecordedEpisode:
         for record in records:
             yield self._decode_frame(record)
 
+    def frame_at(self, index: int) -> RecordedCarlaFrame:
+        """Decode one indexed frame without exposing mutable record metadata."""
+        if not isinstance(index, int) or index < 0 or index >= len(self._records):
+            raise IndexError("recorded frame index is out of range")
+        return self._decode_frame(self._records[index])
+
     def _decode_frame(self, record: Mapping[str, Any]) -> RecordedCarlaFrame:
         frame = int(record["frame_id"])
         sensors = record["sensors"]
@@ -360,6 +369,9 @@ class CarlaRecordedEpisode:
                 or len(imu_timestamps) != self.stack.bev.imu_steps):
             _error("imu_timing_shape_mismatch", f"frame {frame} IMU timing differs")
         state = self._vehicle_state(record.get("ego_state", {}), frame)
+        expert_label = bool(record.get("expert_label", False))
+        expert_source, expert_trajectory, trajectory_mask = (
+            self._decode_expert(record, frame, expert_label))
         return RecordedCarlaFrame(
             sample_index=int(record.get("sample_index", -1)),
             frame_id=frame,
@@ -379,7 +391,54 @@ class CarlaRecordedEpisode:
             imu_timestamps=imu_timestamps,
             sensor_skew_seconds=float(sensors["timestamp_skew_seconds"]),
             action_source=str(record.get("action_source", "unknown")),
-            expert_label=bool(record.get("expert_label", False)),
+            expert_label=expert_label,
+            expert_source=expert_source,
+            expert_trajectory=expert_trajectory,
+            trajectory_mask=trajectory_mask,
+        )
+
+    def _decode_expert(
+            self, record: Mapping[str, Any], frame: int,
+            expert_label: bool
+            ) -> tuple[str, Optional[np.ndarray], Optional[np.ndarray]]:
+        if not expert_label:
+            return "unknown", None, None
+        source = str(record.get("expert_source", "")).strip()
+        if not source:
+            _error("expert_source_missing", f"frame {frame} expert source is empty")
+        try:
+            trajectory = np.asarray(
+                record.get("expert_trajectory"), dtype=np.float32)
+        except (TypeError, ValueError):
+            _error(
+                "expert_trajectory_invalid",
+                f"frame {frame} expert trajectory cannot be decoded")
+        expected = (self.stack.bc_policy.horizon, self.stack.bc_policy.traj_dim)
+        if trajectory.shape != expected:
+            _error(
+                "expert_trajectory_shape_mismatch",
+                f"frame {frame} expert trajectory must be {expected}")
+        if not np.isfinite(trajectory).all():
+            _error(
+                "expert_trajectory_nonfinite",
+                f"frame {frame} expert trajectory contains NaN/Inf")
+        raw_mask = np.asarray(record.get("trajectory_mask"))
+        if raw_mask.shape != (self.stack.bc_policy.horizon,):
+            _error(
+                "trajectory_mask_shape_mismatch",
+                f"frame {frame} trajectory mask shape differs")
+        if raw_mask.dtype != np.bool_:
+            _error(
+                "trajectory_mask_dtype_mismatch",
+                f"frame {frame} trajectory mask must be bool")
+        if not raw_mask.any():
+            _error(
+                "trajectory_mask_empty",
+                f"frame {frame} trajectory mask has no valid waypoint")
+        return (
+            source,
+            np.ascontiguousarray(trajectory.copy()),
+            np.ascontiguousarray(raw_mask.copy()),
         )
 
     def _decode_image(self, path: Path, frame: int, name: str) -> np.ndarray:

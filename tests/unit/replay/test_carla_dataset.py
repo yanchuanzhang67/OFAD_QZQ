@@ -57,7 +57,9 @@ def _calibration() -> dict:
     }
 
 
-def make_episode(tmp_path: Path, *, complete_provenance: bool = False) -> Path:
+def make_episode(
+        tmp_path: Path, *, complete_provenance: bool = False,
+        expert: bool = False) -> Path:
     episode = tmp_path / "episode_test"
     episode.mkdir(parents=True)
     for directory in (
@@ -91,7 +93,7 @@ def make_episode(tmp_path: Path, *, complete_provenance: bool = False) -> Path:
         canonical[:32] = raw
         np.save(episode / raw_path, raw)
         np.save(episode / canonical_path, canonical)
-        records.append({
+        record = {
             "sample_index": sample_index,
             "frame_id": frame,
             "timestamp": frame / 10.0,
@@ -123,18 +125,30 @@ def make_episode(tmp_path: Path, *, complete_provenance: bool = False) -> Path:
                 "acceleration_world_mps2": [0.0, 0.0, 0.1],
                 "steer_normalized": 0.1,
             },
-            "action_source": "traffic_manager_smoke",
-            "expert_label": False,
+            "action_source": (
+                "human-teleop-v1" if expert else "traffic_manager_smoke"),
+            "expert_label": expert,
             "event": {"collision": False},
-        })
+        }
+        if expert:
+            record.update({
+                "expert_source": "human-teleop-v1",
+                "expert_trajectory": [
+                    [0.2 * (index + 1), 0.0, 0.0, 2.0]
+                    for index in range(20)
+                ],
+                "trajectory_mask": [True] * 20,
+            })
+        records.append(record)
     with (episode / "frames.jsonl").open("w", encoding="utf-8") as stream:
         for record in records:
             stream.write(json.dumps(record) + "\n")
     manifest = {
         "schema_version": "new-orad-carla-v1",
         "status": "complete",
-        "action_source": "traffic_manager_smoke",
-        "expert_labels": False,
+        "action_source": (
+            "human-teleop-v1" if expert else "traffic_manager_smoke"),
+        "expert_labels": expert,
         "carla_client_version": "0.9.16",
         "carla_server_version": "0.9.16",
         "map": "Carla/Maps/Town10HD_Opt",
@@ -186,6 +200,40 @@ def test_legacy_episode_requires_opt_in_and_decodes_read_only_frames(tmp_path):
     assert frame.ego_state.yaw == pytest.approx(0.3)
     assert frame.ego_state.vx == pytest.approx(2.206193, rel=1e-5)
     assert frame.ego_state.vy == pytest.approx(0.364296, rel=1e-5)
+    assert frame.expert_source == "unknown"
+    assert frame.expert_trajectory is None
+    assert frame.trajectory_mask is None
+
+
+def test_recorded_episode_decodes_versioned_expert_trajectory(tmp_path):
+    module = _dataset_module()
+    path = make_episode(
+        tmp_path, complete_provenance=True, expert=True)
+
+    frame = next(module.CarlaRecordedEpisode.open(
+        path, load_system_stack(_CONFIG)).iter_frames())
+
+    assert frame.expert_label is True
+    assert frame.expert_source == "human-teleop-v1"
+    assert frame.expert_trajectory.shape == (20, 4)
+    assert frame.expert_trajectory.dtype == np.float32
+    assert frame.trajectory_mask.shape == (20,)
+    assert frame.trajectory_mask.dtype == np.bool_
+
+
+def test_recorded_episode_rejects_malformed_expert_trajectory(tmp_path):
+    module = _dataset_module()
+    path = make_episode(
+        tmp_path, complete_provenance=True, expert=True)
+    _mutate_first_record(
+        path / "frames.jsonl",
+        lambda record: record.update({"expert_trajectory": [[0.0] * 4]}))
+    episode = module.CarlaRecordedEpisode.open(path, load_system_stack(_CONFIG))
+
+    with pytest.raises(module.DatasetContractError) as exc_info:
+        next(episode.iter_frames())
+
+    assert exc_info.value.code == "expert_trajectory_shape_mismatch"
 
 
 @pytest.mark.parametrize(("mutation", "code"), [

@@ -38,6 +38,11 @@
   collection with the expected `ModuleNotFoundError: policy.bc_policy`.
 - 2026-09-04 Task 2 Green: Pure BC policy tests passed (`13 passed`), legacy
   HybridPolicy regression passed (`8 passed`), and targeted flake8 exited 0.
+- 2026-09-04 Task 3 Red: replay/expert dataset tests stopped at collection with
+  the expected `ModuleNotFoundError: training`.
+- 2026-09-04 Task 3 Green: replay/expert dataset tests passed (`17 passed`),
+  including explicit non-expert rejection and health rejection evidence;
+  targeted flake8 exited 0.
 
 ---
 
@@ -470,7 +475,7 @@ git commit -m "feat: add deterministic pure BC policy"
   `BCSample`, `BCBatch`, `ExpertBCDataset.open(manifest_path, split, stack)` and
   `collate_bc_samples(samples)`.
 
-- [ ] **Step 1: Write failing additive replay-schema tests**
+- [x] **Step 1: Write failing additive replay-schema tests**
 
 ```python
 def test_recorded_episode_decodes_versioned_expert_trajectory(valid_episode):
@@ -489,7 +494,7 @@ def test_non_expert_episode_remains_readable_for_replay(valid_episode):
     assert frame.trajectory_mask is None
 ```
 
-- [ ] **Step 2: Write failing manifest, split and rejection tests**
+- [x] **Step 2: Write failing manifest, split and rejection tests**
 
 ```python
 def test_expert_dataset_rejects_current_traffic_manager_episode():
@@ -515,7 +520,7 @@ def test_collate_produces_canonical_b0_batch(expert_manifest):
     assert batch.mask.shape == (2, 20)
 ```
 
-- [ ] **Step 3: Run focused tests and record the Red result**
+- [x] **Step 3: Run focused tests and record the Red result**
 
 Run:
 
@@ -527,7 +532,7 @@ python -m pytest -q \
 
 Expected: import/attribute failures for the missing expert fields and training package.
 
-- [ ] **Step 4: Implement additive expert decoding**
+- [x] **Step 4: Implement additive expert decoding**
 
 Append optional fields with defaults so existing frame construction remains compatible:
 
@@ -545,7 +550,7 @@ When `expert_label` is true, require `expert_source` to be non-empty, parse
 `(20,)`, and require at least one valid waypoint. When false, leave both tensors
 as `None`; do not synthesize labels from `action_raw` or `action_applied`.
 
-- [ ] **Step 5: Implement the strict split manifest and dataset**
+- [x] **Step 5: Implement the strict split manifest and dataset**
 
 The manifest contract is:
 
@@ -596,7 +601,7 @@ class BCBatch:
         return int(self.images.shape[0])
 ```
 
-- [ ] **Step 6: Run focused tests and record the Green result**
+- [x] **Step 6: Run focused tests and record the Green result**
 
 Run:
 
@@ -609,7 +614,7 @@ python -m pytest -q \
 Expected: PASS; the repository's current non-expert episode is explicitly rejected
 by `ExpertBCDataset` while remaining readable by normal replay.
 
-- [ ] **Step 7: Update plan evidence and commit Task 3**
+- [x] **Step 7: Update plan evidence and commit Task 3**
 
 ```bash
 git add src/replay/carla_dataset.py src/training/__init__.py \
