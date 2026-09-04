@@ -1,7 +1,7 @@
 # 分层策略学习架构与 B0 Pure BC 设计
 
 - 日期：2026-09-04
-- 状态：聊天设计已确认，等待书面规格审阅
+- 状态：书面规格已于 2026-09-04 确认；B0 实施计划已建立，代码尚未开始
 - 本轮实施范围：B0 `BEV + Dynamics → Pure BC trajectory`
 - 当前实现成熟度：B0 尚未实现；既有 `HybridPolicy` 维持单元验证
 - 外部依赖 Gate：正式专家标签、episode 级冻结 split 和可追溯 perception checkpoint
@@ -294,9 +294,15 @@ runs/bc/<run_id>/
 ├── metrics.json
 ├── logs/
 └── checkpoints/
-    ├── best.pt
-    └── last.pt
+    ├── epoch-0001.pt
+    ├── epoch-0002.pt
+    ├── best.json
+    └── last.json
 ```
+
+每个 epoch checkpoint 使用新文件名，禁止覆盖已生成权重；`best.json` 和 `last.json`
+只保存 checkpoint 文件名、hash 和对应 epoch，并通过原子替换更新。这样既能稳定解析
+best/last，又保留所有历史权重。
 
 checkpoint 至少包含：
 
@@ -370,10 +376,12 @@ B3 不是“去掉 BC 的 Dreamer”，而是 `BC initialization + Dreamer fine-
 
 ## 10. 文档与实施边界
 
-本设计经书面审阅后，只进入 B0 实施计划。B0 每个任务完成时实时更新计划中的
+本设计已经书面审阅，只进入 B0 实施计划。B0 每个任务完成时实时更新计划中的
 Red/Green 证据；代码完成后同步更新 `README.md`、`System_overview.md`、
 `docs/技术原理与代码架构.md`、`docs/ENGINEERING_EXECUTION_ROADMAP.md`、
 `docs/SmartSteer_Status.md` 和 `docs/README.md`。
 
 B0 的软件实现完成不等于专家数据、模型性能或 CARLA 闭环完成；所有状态更新必须继续
 使用“代码骨架、单元验证、离线验证、仿真闭环验证、车辆验证”五级术语。
+
+实施计划：`../plans/2026-09-04-staged-policy-learning-b0.md`。

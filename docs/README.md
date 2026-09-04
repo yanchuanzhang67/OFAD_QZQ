@@ -42,7 +42,10 @@
 - `superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md`：固定
   `Pure BC → Affordance+BC → Affordance+RSSM+BC → BC-initialized Dreamer`
   的递进式研究架构，并把当前实施范围限定为不经过 RSSM 的 B0 Pure BC；聊天设计
-  已确认，书面规格等待审阅，尚未改变代码成熟度。
+  与书面规格均已确认，尚未改变代码成熟度。
+- `superpowers/plans/2026-09-04-staged-policy-learning-b0.md`：B0 Pure BC 的九任务
+  TDD 实施计划，覆盖动力学/配置契约、确定性网络、专家数据、指标、checkpoint、
+  train/eval CLI、recorded replay、全量验证和实时文档证据；当前等待选择执行方式。
 
 ## 审计与整改日志
 

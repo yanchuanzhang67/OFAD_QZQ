@@ -274,8 +274,10 @@ python -m pytest -ra
 `Affordance + RSSM + BC`、B3 `BC-initialized Dreamer`。当前只进入 B0 设计，
 现有 `HybridPolicy.bc_loss()` 因前向路径经过 single-step RSSM posterior，继续作为
 Hybrid/Dreamer 历史骨架，不能作为 Pure BC 对照组。B0 书面规格见
-`superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md`；该决策不改变
-Stage 3 当前“单元验证”成熟度，也不解除专家数据与正式 perception checkpoint Gate。
+`superpowers/specs/2026-09-04-staged-policy-learning-b0-design.md`；书面规格已确认，
+九任务 TDD 计划位于 `superpowers/plans/2026-09-04-staged-policy-learning-b0.md`，
+代码尚未开始。该决策不改变 Stage 3 当前“单元验证”成熟度，也不解除专家数据与
+正式 perception checkpoint Gate。
 
 ### 目标
 
