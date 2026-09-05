@@ -38,6 +38,15 @@ CARLA / Gazebo / ONNX / TensorRT / vehicle deployment
 
 设计基线见 [System_overview.md](./System_overview.md)，实际实现状态以审计过程文档和自动化测试为准。
 
+## 方法 Pipeline 设计图
+
+![New_ORAD 多模态感知、地形可供性、世界模型、混合策略、安全控制与部署流程](./image.png)
+
+图中展示的是 New_ORAD 的完整目标研究链路：多模态 BEV 感知作为支撑基础，依次连接
+Terrain Affordance、Terrain-aware RSSM、BC + Dreamer、显式安全过滤和车辆执行。
+当前已实现程度、离线证据及尚未关闭的 Gate 以
+[SmartSteer 状态总览](./docs/SmartSteer_Status.md)为准。
+
 ## 目录结构
 
 ```text
