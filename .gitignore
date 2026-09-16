@@ -31,3 +31,9 @@ build_colcon/
 .idea/
 .DS痕
 .DS_Store
+
+# Generated datasets - stored outside source control
+/datasets/
+
+# Runtime / evaluation artifacts
+/artifacts/
