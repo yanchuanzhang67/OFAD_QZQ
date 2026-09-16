@@ -1,5 +1,7 @@
 ## 越野非结构化场景下基于 IL + RL 的端到端自动驾驶系统设计文档 (SDD)
 
+> 2026-09-11 Scout 目标传感器为前向 RGB、Livox Mid-360（含 IMU）和轮速，见[传感器方案](docs/SCOUT_MID360_PLAN.md)。当前只完成 Forest V2 离线数据合同，尚未替换既有 CARLA 训练管线。
+
 > 2026-09-04 实现状态：系统已加入严格 `Observation`/frame/timestamp 契约、
 > SafetySupervisor 三态 fail-safe、唯一 YAML 配置装配和显式 occupancy 安全路由；
 > 独立 B0 `pure_bc_v1` 数据/训练/评估/checkpoint/replay 边界达到**单元验证**。

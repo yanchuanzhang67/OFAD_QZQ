@@ -1,5 +1,7 @@
 # New_ORAD
 
+> 2026-09-11 Scout/Mid-360 传感器方案见[方案文档](docs/SCOUT_MID360_PLAN.md)。当前已完成 Forest V2 严格离线读取与校验；融合、训练和闭环尚未完成。
+
 New_ORAD（Off-Road Autonomous Driving）是面向非结构化越野环境的模块化端到端自动驾驶研究项目，目标涵盖多模态 BEV 感知、隐空间世界模型、模仿学习与强化学习策略、运动学安全过滤、ROS 2 控制及 ONNX/TensorRT 部署。
 
 > 当前状态（2026-09-04）：recorded CARLA 数据已打通 HealthGate→BEV→Policy→

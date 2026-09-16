@@ -1,5 +1,7 @@
 # New_ORAD 文档导航
 
+> 当前传感器方案见 [SCOUT_MID360_PLAN.md](SCOUT_MID360_PLAN.md)：前向 RGB、Mid-360 和 Scout 状态；Forest V2 数据合同已离线验证，融合与训练仍待实施。
+
 本文档是 `docs/` 的入口。状态结论优先阅读“当前基线”；Phase 文档与带日期
 的审计报告保留过程证据，不应单独作为当前完成度声明。
 

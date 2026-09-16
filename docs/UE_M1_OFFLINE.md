@@ -100,3 +100,13 @@ under the enclosing project's `Saved/OFAD/M1Acceptance`. Thirty frames contain
 The stationary/forward/left-turn sequence has correct measured velocity/yaw signs.
 See the enclosing project's `Docs/OFAD_M1_Guide.md` and
 `Saved/OFAD/M1Acceptance/verification.json` for actual logs, source hashes and limits.
+
+## Forest V2 offline consumer（2026-09-15）
+
+Forest 单相机协议使用独立的 `UERecordedEpisodeV2`，不放宽本页 V1 loader。验证命令：
+
+```powershell
+.venv\Scripts\python.exe scripts\verify_ue_episode_v2.py <forest-v2-episode>
+```
+
+V2 严格要求单路 `(180,320,3)` 图像、profile 一致的 `float32 (N,4)` LiDAR、`(10,6)` IMU、同帧 10 Hz 时序和完整 provenance。当前 smoke 数据固定拒绝专家资格。生产端和完整契约见 UE 仓库的 `Docs/OFAD_Forest_V2_Guide.md`。
