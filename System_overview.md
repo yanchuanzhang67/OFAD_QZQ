@@ -166,3 +166,9 @@ recorded replay 路由。现有 200 帧 Traffic Manager episode 明确
 - 硬件部署规范：
     - 模型基于 PyTorch 训练与验证。
     - 编译导出为 ONNX 格式，并在端侧（如 NVIDIA Jetson 或车载计算单元）利用 TensorRT (C++) 进行 FP16 / INT8 量化与异步多线程 CUDA Stream 部署。
+# UE Scout M1 extension (2026-09-10)
+
+The isolated `ue_recording` consumer and `utils.types.RecordedUEFrame` add the
+native UE Scout format without changing CARLA or training interfaces. Status:
+offline verified with genuine UE data. See [UE M1 SDD/TDD](docs/UE_M1_OFFLINE.md) for format, SI frames,
+strict validation and evidence. `scout-dynamics-v1` is not a car steering schema.

@@ -16,6 +16,9 @@ __all__ = [
     "VehicleState",
     "EGO_DYNAMICS_V1_FIELDS",
     "EgoDynamicsV1",
+    "ScoutDynamicsV1",
+    "SCOUT_DYNAMICS_V1_FIELDS",
+    "RecordedUEFrame",
     "Waypoint",
     "Trajectory",
     "OccupancyGrid",
@@ -85,6 +88,45 @@ class EgoDynamicsV1:
 
     def to_array(self) -> np.ndarray:
         return np.asarray(self.values, dtype=np.float32).copy()
+
+
+SCOUT_DYNAMICS_V1_FIELDS = (
+    "signed_forward_speed", "yaw_rate", "pitch", "roll",
+    "vx", "vy", "accel_z", "command_yaw_rate",
+)
+
+
+@dataclass(frozen=True)
+class ScoutDynamicsV1:
+    """Scout measured dynamics + commanded yaw rate, never car steering/BC input."""
+
+    values: tuple[float, ...]
+    schema_version = "scout-dynamics-v1"
+
+    def __post_init__(self) -> None:
+        if len(self.values) != 8 or not np.isfinite(self.values).all():
+            raise ValueError("scout-dynamics-v1 requires eight finite values")
+
+    def to_array(self) -> np.ndarray:
+        return np.asarray(self.values, dtype=np.float32).copy()
+
+
+@dataclass(frozen=True)
+class RecordedUEFrame:
+    """SI, right-handed M1 observation, explicitly outside CARLA policy schemas."""
+
+    sample_index: int
+    frame_id: int
+    timestamp: float
+    images: tuple[np.ndarray, ...]  # front/rear/top RGB HWC uint8
+    raw_point_cloud: np.ndarray  # complete sensor-frame xyzi float32
+    canonical_point_cloud: np.ndarray  # 256 unique sampled ego-frame xyzi
+    imu: np.ndarray  # 10x6 specific force (including gravity), body angular velocity
+    scout_dynamics: ScoutDynamicsV1
+    ego_state: dict
+    action_applied: dict
+    action_source: str
+    expert_label: bool = False
 
 
 @dataclass

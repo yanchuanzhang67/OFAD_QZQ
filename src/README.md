@@ -44,6 +44,10 @@ fusion.py         explicit camera/LiDAR availability and BEV Conv fuser
 
 ## Recorded replay boundary
 
+`ue_recording.UERecordedEpisode` 独立加载原生 UE Scout M1，纯 numpy/Pillow；
+`utils.types.RecordedUEFrame` 和 `ScoutDynamicsV1` 定义 SI/右手系离线输出。
+格式与验证见 [UE M1 SDD/TDD](../docs/UE_M1_OFFLINE.md)，不进入 CARLA/BC pipeline。
+
 `replay.carla_dataset` 只读加载带 `_SUCCESS` 的 episode，并在解码前校验 schema、
 Canonical、frame/timestamp、路径边界和传感器文件。历史 manifest 缺失的 provenance
 必须显式 opt-in 并保留 gaps；不得从当前源码反推历史车辆或配置。recorded replay

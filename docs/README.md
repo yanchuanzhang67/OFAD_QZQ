@@ -5,6 +5,9 @@
 
 ## 当前基线
 
+- [UE_M1_OFFLINE.md](UE_M1_OFFLINE.md)：2026-09-10 原生 UE Scout M1 独立离线格式、
+  纯 numpy/Pillow loader、非专家状态边界及 TDD 证据；状态为 offline verified（30帧真实UE输出）。
+
 - `SmartSteer_Status.md`：2026-09-04 当前项目状态总览，按软件边界 `6/6`、正式
   里程碑 `2/8` 和 M0 样本 `200/1000` 三种口径统计进度，并汇总完整代码架构、
   Canonical 参数、B0 `9/9` 软件任务、提交级过程追溯、数据流、未解决问题和关键

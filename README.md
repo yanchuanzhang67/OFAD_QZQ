@@ -396,3 +396,9 @@ CPU integration contract tests：不得 skip
 ## 安全声明
 
 本项目当前用于研究、原型验证和工程开发。未经完整 SIL/HIL、封闭场地测试、车辆级功能安全分析和独立安全审查，不得直接用于开放道路或载人车辆控制。
+# Native UE Scout M1 extension
+
+The separate [UE M1 offline consumer](docs/UE_M1_OFFLINE.md) validates committed
+native UE recordings and exposes real RGB images, raw/canonical points, IMU and
+`scout-dynamics-v1`. Status: offline verified with a genuine 30-frame UE episode; no BC or closed-loop claim.
+Run `.venv/Scripts/python.exe scripts/verify_ue_episode.py <episode-directory>`.
